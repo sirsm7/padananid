@@ -3,14 +3,14 @@
  * Folder: /src/js/ui.js
  * Fungsi: Menguruskan kemas kini DOM, manipulasi class CSS Tailwind, dan feedback visual.
  * Arkitek: Pro Web Caster (Aliran V2: Muat Naik -> Pilih Sekolah)
- * Kemas kini: Menggunakan corak Getter untuk Lazy DOM Evaluation bagi mengelakkan ralat 'null'.
+ * Kemas kini: Menggunakan corak Getter untuk Lazy DOM Evaluation. Pelaksanaan <datalist> natif.
  */
 
 // ============================================================================
 // ELEMEN DOM (CACHED VIA GETTERS)
 // ============================================================================
 export const UI = {
-    // Langkah 1: Muat Naik Fail (Dulu Langkah 2)
+    // Langkah 1: Muat Naik Fail
     get step1Container() { return document.getElementById('step1Container'); },
     get dropzone() { return document.getElementById('dropzone'); },
     get fileInput() { return document.getElementById('fileInput'); },
@@ -19,12 +19,11 @@ export const UI = {
     get recordCountDisplay() { return document.getElementById('recordCountDisplay'); },
     get cancelUploadBtn() { return document.getElementById('cancelUploadBtn'); },
 
-    // Langkah 2: Carian Sekolah & Mula (Dulu Langkah 1)
+    // Langkah 2: Carian Sekolah & Mula
     get step2Container() { return document.getElementById('step2Container'); },
     get step2LockIcon() { return document.getElementById('step2LockIcon'); },
     get schoolSearchInput() { return document.getElementById('schoolSearchInput'); },
-    get schoolDropdown() { return document.getElementById('schoolDropdown'); },
-    get schoolList() { return document.getElementById('schoolList'); },
+    get schoolDataList() { return document.getElementById('schoolDataList'); }, // DIKEMAS KINI
     get startMatchBtn() { return document.getElementById('startMatchBtn'); },
     get selectedSchoolInfo() { return document.getElementById('selectedSchoolInfo'); },
     get displaySchoolName() { return document.getElementById('displaySchoolName'); },
@@ -50,9 +49,6 @@ export const UI = {
 // KAWALAN FAIL (LANGKAH 1)
 // ============================================================================
 
-/**
- * Efek visual ketika drag & drop fail
- */
 export const highlightDropzone = () => {
     if(UI.dropzone) {
         UI.dropzone.classList.add('bg-blue-50', 'border-secondary', 'border-solid');
@@ -67,26 +63,16 @@ export const unhighlightDropzone = () => {
     }
 };
 
-/**
- * Papar maklumat fail setelah fail berjaya dibaca dan BUKA Langkah 2
- */
 export const showFileInfo = (fileName, recordCount) => {
-    // Sembunyikan dropzone asal, tunjuk kawasan info
     if(UI.dropzone) UI.dropzone.classList.add('hidden');
-    
     if(UI.fileNameDisplay) UI.fileNameDisplay.textContent = fileName;
     if(UI.recordCountDisplay) UI.recordCountDisplay.textContent = `(${recordCount} rekod dibaca)`;
     if(UI.fileInfoArea) UI.fileInfoArea.classList.remove('hidden');
-
-    // Buka (Unlock) Langkah 2
     unlockStep2();
 };
 
-/**
- * Membatalkan muat naik dan mengembalikan UI Langkah 1 ke keadaan asal
- */
 export const resetFileUploadUI = () => {
-    if(UI.fileInput) UI.fileInput.value = ''; // Kosongkan input
+    if(UI.fileInput) UI.fileInput.value = '';
     if(UI.fileInfoArea) UI.fileInfoArea.classList.add('hidden');
     if(UI.dropzone) UI.dropzone.classList.remove('hidden');
     lockStep2();
@@ -117,7 +103,6 @@ const lockStep2 = () => {
         `;
     }
     
-    // Reset carian sekolah jika dilock
     if(UI.schoolSearchInput) UI.schoolSearchInput.value = '';
     if(UI.selectedSchoolInfo) UI.selectedSchoolInfo.classList.add('hidden');
     if(UI.startMatchBtn) {
@@ -127,48 +112,28 @@ const lockStep2 = () => {
 };
 
 // ============================================================================
-// KAWALAN DROPDOWN SEKOLAH (LANGKAH 2)
+// KAWALAN DATALIST SEKOLAH (LANGKAH 2) - DIKEMAS KINI
 // ============================================================================
 
-export const renderSchoolDropdown = (schools, filterText, onSelectCallback) => {
-    if(!UI.schoolList || !UI.schoolDropdown) return;
+/**
+ * Mengisi HTML <datalist> dengan senarai pilihan sekolah
+ * @param {Array} schools - Tatasusunan objek sekolah dari API
+ */
+export const populateSchoolDataList = (schools) => {
+    if(!UI.schoolDataList) return;
 
-    UI.schoolList.innerHTML = '';
+    UI.schoolDataList.innerHTML = '';
     
-    if (!filterText) {
-        UI.schoolDropdown.classList.add('hidden');
-        return;
-    }
-
-    const filteredSchools = schools.filter(school => {
-        const searchText = filterText.toLowerCase();
-        return school.nama_sekolah.toLowerCase().includes(searchText) || 
-               school.kod_ou.toString().includes(searchText);
-    });
-
-    if (filteredSchools.length === 0) {
-        UI.schoolList.innerHTML = `<li class="cursor-default select-none px-4 py-2 text-gray-500">Tiada sekolah dijumpai.</li>`;
-        UI.schoolDropdown.classList.remove('hidden');
-        return;
-    }
-
-    filteredSchools.slice(0, 50).forEach(school => {
-        const li = document.createElement('li');
-        li.className = "cursor-pointer select-none px-4 py-2 hover:bg-blue-50 text-gray-900";
-        li.innerHTML = `<div class="font-medium">${school.nama_sekolah}</div><div class="text-xs text-gray-500">KOD OU: ${school.kod_ou}</div>`;
+    schools.forEach(school => {
+        const option = document.createElement('option');
+        // Gabungkan nama dan kod untuk paparan input / carian pantas
+        option.value = `${school.nama_sekolah} (KOD OU: ${school.kod_ou})`;
+        // Simpan data sebenar secara berasingan menggunakan data attributes
+        option.setAttribute('data-nama', school.nama_sekolah);
+        option.setAttribute('data-ou', school.kod_ou);
         
-        li.addEventListener('mousedown', () => {
-            onSelectCallback(school);
-        });
-        
-        UI.schoolList.appendChild(li);
+        UI.schoolDataList.appendChild(option);
     });
-
-    UI.schoolDropdown.classList.remove('hidden');
-};
-
-export const closeSchoolDropdown = () => {
-    if(UI.schoolDropdown) UI.schoolDropdown.classList.add('hidden');
 };
 
 /**
@@ -177,7 +142,6 @@ export const closeSchoolDropdown = () => {
 export const showSelectedSchool = (schoolName, schoolOu) => {
     if(UI.displaySchoolName) UI.displaySchoolName.textContent = schoolName;
     if(UI.displaySchoolOu) UI.displaySchoolOu.textContent = schoolOu;
-    if(UI.schoolSearchInput) UI.schoolSearchInput.value = schoolName; 
     if(UI.selectedSchoolInfo) UI.selectedSchoolInfo.classList.remove('hidden');
     
     // AKTIFKAN BUTANG MULA PADANAN
@@ -185,7 +149,6 @@ export const showSelectedSchool = (schoolName, schoolOu) => {
         UI.startMatchBtn.disabled = false;
         UI.startMatchBtn.classList.remove('opacity-50', 'cursor-not-allowed');
     }
-    closeSchoolDropdown();
 };
 
 // ============================================================================
@@ -226,22 +189,17 @@ export const showResults = (stats) => {
     
     if(UI.resultsContainer) UI.resultsContainer.classList.remove('hidden');
     
-    // Kunci langkah di atas supaya tidak diubah semasa keputusan sedang dipapar
     if(UI.step1Container) UI.step1Container.classList.add('opacity-50', 'pointer-events-none');
     if(UI.step2Container) UI.step2Container.classList.add('opacity-50', 'pointer-events-none');
 
-    // Auto-scroll ke keputusan
     if(UI.resultsContainer) UI.resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
-/**
- * Reset sistem sepenuhnya (Kembali ke keadaan awal)
- */
 export const resetFullSystemUI = () => {
     if(UI.resultsContainer) UI.resultsContainer.classList.add('hidden');
     if(UI.step1Container) UI.step1Container.classList.remove('opacity-50', 'pointer-events-none');
     
-    resetFileUploadUI(); // Ini akan mengunci Langkah 2 secara automatik
+    resetFileUploadUI(); 
     
     window.scrollTo({ top: 0, behavior: 'smooth' });
 };

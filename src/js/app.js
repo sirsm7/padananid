@@ -3,6 +3,7 @@
  * Folder: /src/js/app.js
  * Fungsi: Mengurus kitaran hayat aplikasi, state (keadaan) data, dan event listeners DOM.
  * Arkitek: Pro Web Caster (Aliran V2: Muat Naik -> Pilih Sekolah -> Padan)
+ * Kemas kini: Penyatuan elemen native <datalist> (Seni Bina SoC).
  */
 
 // ============================================================================
@@ -11,8 +12,7 @@
 import { fetchSchoolsList, fetchSchoolData, fetchGlobalMatch } from './api.js';
 import { 
     UI, 
-    renderSchoolDropdown, 
-    closeSchoolDropdown, 
+    populateSchoolDataList, // Diimport baharu dari ui.js 
     showSelectedSchool, 
     highlightDropzone, 
     unhighlightDropzone, 
@@ -54,9 +54,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         AppState.allSchools = await fetchSchoolsList();
         
+        // Isikan terus ke dalam <datalist> secara pukal (Native DOM)
+        populateSchoolDataList(AppState.allSchools);
+        
         UI.schoolSearchInput.placeholder = "Taip nama sekolah atau kod sekolah...";
         UI.schoolSearchInput.disabled = false;
-        console.log(`Berjaya memuatkan ${AppState.allSchools.length} sekolah.`);
+        console.log(`Berjaya memuatkan ${AppState.allSchools.length} sekolah ke dalam Datalist.`);
     } catch (error) {
         console.error("Gagal memulakan senarai sekolah:", error);
         UI.schoolSearchInput.placeholder = "Gagal memuat turun data sekolah.";
@@ -101,23 +104,9 @@ function setupEventListeners() {
         resetFileUploadUI();
     });
 
-    // --- LANGKAH 2: DROPDOWN SEKOLAH ---
-    UI.schoolSearchInput.addEventListener('input', (e) => {
-        const searchText = e.target.value.trim();
-        renderSchoolDropdown(AppState.allSchools, searchText, handleSchoolSelection);
-    });
-
-    UI.schoolSearchInput.addEventListener('focus', (e) => {
-        const searchText = e.target.value.trim();
-        if (searchText) renderSchoolDropdown(AppState.allSchools, searchText, handleSchoolSelection);
-    });
-
-    // Tutup dropdown jika pengguna klik di luar kawasan
-    document.addEventListener('mousedown', (e) => {
-        if (!UI.schoolSearchInput.contains(e.target) && !UI.schoolDropdown.contains(e.target)) {
-            closeSchoolDropdown();
-        }
-    });
+    // --- LANGKAH 2: PILIHAN SEKOLAH DARI DATALIST ---
+    // Menggunakan 'change' untuk menangkap pilihan dari Datalist secara natif
+    UI.schoolSearchInput.addEventListener('change', handleSchoolSelection);
 
     // --- LANGKAH 2: MULA PADANAN (Cetus API -> Matcher) ---
     UI.startMatchBtn.addEventListener('click', handleStartMatchingProcess);
@@ -167,11 +156,53 @@ async function handleFileUpload(file) {
 }
 
 /**
- * Pengendali apabila pengguna memilih sekolah dari senarai dropdown
+ * Pengendali apabila pengguna memilih atau menaip nama sekolah di Datalist Input
  */
-function handleSchoolSelection(schoolData) {
-    AppState.selectedSchool = schoolData;
-    showSelectedSchool(schoolData.nama_sekolah, schoolData.kod_ou);
+function handleSchoolSelection(e) {
+    const selectedValue = e.target.value.trim();
+
+    // Jika pengguna memadam teks
+    if (!selectedValue) {
+        AppState.selectedSchool = null;
+        if(UI.startMatchBtn) {
+            UI.startMatchBtn.disabled = true;
+            UI.startMatchBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+        if(UI.selectedSchoolInfo) UI.selectedSchoolInfo.classList.add('hidden');
+        return;
+    }
+
+    const options = UI.schoolDataList.options;
+    let matchedOption = null;
+
+    // Padankan input teks dengan nilai di dalam <option> Datalist
+    for (let i = 0; i < options.length; i++) {
+        if (options[i].value === selectedValue) {
+            matchedOption = options[i];
+            break;
+        }
+    }
+
+    if (matchedOption) {
+        // Ekstrak data sebenar dari atribut tersembunyi (data-nama, data-ou)
+        const schoolName = matchedOption.getAttribute('data-nama');
+        const schoolOu = matchedOption.getAttribute('data-ou');
+
+        AppState.selectedSchool = {
+            nama_sekolah: schoolName,
+            kod_ou: schoolOu
+        };
+
+        showSelectedSchool(schoolName, schoolOu);
+    } else {
+        // Jika input ditaip secara manual tapi tiada dalam senarai
+        AppState.selectedSchool = null;
+        if(UI.startMatchBtn) {
+            UI.startMatchBtn.disabled = true;
+            UI.startMatchBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+        if(UI.selectedSchoolInfo) UI.selectedSchoolInfo.classList.add('hidden');
+    }
 }
 
 /**
@@ -185,7 +216,7 @@ async function handleStartMatchingProcess() {
     }
 
     if (!AppState.selectedSchool) {
-        alert("Ralat: Sila pilih nama sekolah untuk skop carian.");
+        alert("Ralat: Sila pilih nama sekolah yang sah dari senarai.");
         return;
     }
 
