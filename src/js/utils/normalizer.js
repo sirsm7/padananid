@@ -1,30 +1,23 @@
 /**
- * Modul: Normalisasi Nama (Utility)
+ * Modul: Normalisasi (Utility)
  * Folder: /src/js/utils/normalizer.js
- * Fungsi: Membersihkan dan menormalisasi teks/nama untuk meningkatkan ketepatan padanan data.
- * Arkitek: Pro Web Caster (Migrasi daripada Normalisasi.gs ke ES6 Module)
+ * Fungsi: Membersihkan teks/nama dan memformat data khusus (seperti Kod OU).
+ * Arkitek: Pro Web Caster (Two-Pass Matching Update)
  */
 
 /**
  * Fungsi utama untuk menormalisasikan nama pelajar bagi membolehkan padanan yang tepat.
- * Logik ini membuang alias (@), tag KPM (KPM-MURID, dll), dan ruang kosong berlebihan.
- * * @param {string} name - Nama mentah dari CSV atau Pangkalan Data.
+ * @param {string} name - Nama mentah dari CSV atau Pangkalan Data.
  * @returns {string} - Nama yang telah dinormalisasi sepenuhnya.
  */
 export const normalizeName = (name) => {
-    // Pengesahan integriti data: Kembalikan rentetan kosong jika tiada data atau format tidak sah
     if (!name || typeof name !== 'string') {
         return '';
     }
 
-    // 1. Tukar semua aksara kepada Huruf Besar (Uppercase)
     let normalized = name.toUpperCase();
-
-    // 2. Buang sebarang tag '@' (Contoh: "MOHD @ MOHAMMAD" menjadi "MOHD ")
-    // Juga berfungsi membuang sambungan emel jika data termasuk alamat emel secara tidak sengaja
     normalized = normalized.split('@')[0];
 
-    // 3. Senarai Corak Regex untuk menggugurkan akhiran sistem pelik
     const tagsToRemove = [
         /\(KPM-MURID\)/g,
         /KPM-MURID/g,
@@ -36,15 +29,26 @@ export const normalizeName = (name) => {
         /MOE/g
     ];
 
-    // Laksana pembuangan tag secara iteratif
     tagsToRemove.forEach(tag => {
         normalized = normalized.replace(tag, '');
     });
 
-    // 4. Bersihkan ruang kosong (spaces)
-    // - Tukar pelbagai ruang kosong berturut-turut menjadi satu ruang kosong sahaja
-    // - Trim ruang kosong di permulaan dan pengakhiran rentetan
     normalized = normalized.replace(/\s+/g, ' ').trim();
-
     return normalized;
+};
+
+/**
+ * [BARU] Memformat kod OU untuk hanya memulangkan siri nombor di penghujung.
+ * Contoh: "/JPN/MELAKA/M020/SEKOLAH-1234" -> "1234"
+ * @param {string} rawOu - Kod OU mentah dari pangkalan data.
+ * @returns {string} - Kod OU yang telah diekstrak nombornya sahaja.
+ */
+export const formatOU = (rawOu) => {
+    if (!rawOu || typeof rawOu !== 'string') return '-';
+    
+    // Cari rentetan nombor yang berada di penghujung teks ($)
+    const match = rawOu.match(/\d+$/);
+    
+    // Pulangkan nombor jika dijumpai, jika tidak pulangkan nilai asal sebagai sandaran (fallback)
+    return match ? match[0] : rawOu;
 };

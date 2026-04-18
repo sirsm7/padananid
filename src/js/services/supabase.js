@@ -1,8 +1,9 @@
 /**
  * Modul: Integrasi Supabase (Service)
  * Folder: /src/js/services/supabase.js
- * Fungsi: Menguruskan hubungan, pengesahan, dan penarikan data daripada jadual 'delima_salinan_admin' Supabase.
+ * Fungsi: Menguruskan hubungan, pengesahan, dan penarikan data daripada jadual Supabase.
  * Arkitek: Pro Web Caster (Migrasi ke Standalone Client-Side)
+ * Keselamatan: 100% Read-Only. Tiada operasi insert/update/upsert.
  */
 
 // ============================================================================
@@ -10,12 +11,11 @@
 // Sila kemas kini URL dan ANON_KEY ini dengan kelayakan projek Supabase anda.
 // ============================================================================
 const SUPABASE_CONFIG = {
-    URL: 'https://app.tech4ag.my',
-    ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzYzMzczNjQ1LCJleHAiOjIwNzg3MzM2NDV9.vZOedqJzUn01PjwfaQp7VvRzSm4aRMr21QblPDK8AoY'
+    URL: 'SILA_MASUKKAN_SUPABASE_PROJECT_URL_ANDA_DI_SINI',
+    ANON_KEY: 'SILA_MASUKKAN_SUPABASE_ANON_KEY_ANDA_DI_SINI'
 };
 
 // Inisialisasi klien Supabase menggunakan fungsi dari CDN yang dimuatkan di index.html
-// Objek 'supabase' wujud secara global (window.supabase) disebabkan CDN.
 const supabaseClient = window.supabase.createClient(
     SUPABASE_CONFIG.URL,
     SUPABASE_CONFIG.ANON_KEY
@@ -23,12 +23,11 @@ const supabaseClient = window.supabase.createClient(
 
 /**
  * Menguji sambungan ke Supabase untuk memastikan klien dikonfigurasi dengan betul.
- * Berguna untuk menukar status lencana (badge) di UI.
  * @returns {Promise<boolean>} - True jika berjaya berhubung, False jika gagal.
  */
 export const checkSupabaseConnection = async () => {
     try {
-        // Lakukan query ringkas untuk menyemak status akses
+        // Lakukan query ringkas untuk menyemak status akses. READ-ONLY.
         const { error } = await supabaseClient.from('delima_salinan_admin').select('id').limit(1);
         if (error) {
             console.error("Ralat Sambungan Supabase:", error.message);
@@ -42,40 +41,94 @@ export const checkSupabaseConnection = async () => {
 };
 
 /**
- * Menarik senarai data pelajar dari jadual 'delima_salinan_admin'.
- * Fungsi ini menyokong penarikan data secara berkelompok (pagination/limit) 
- * jika data terlampau besar, tetapi secara lalai akan cuba menarik semua padanan.
- * * @param {string} kodSekolah - (Pilihan) Tapis data berdasarkan kod sekolah untuk mengelakkan muat turun data yang tidak relevan.
- * @returns {Promise<Array>} - Tatasusunan (Array) objek data dari Supabase.
+ * [BARU] Menarik senarai sekolah dari jadual 'delima_data_sekolah' untuk dropdown UI.
+ * @returns {Promise<Array>} - Tatasusunan (Array) objek sekolah {kod_ou, nama_sekolah}.
  */
-export const fetchDelimaData = async (kodSekolah = null) => {
+export const fetchSchoolsList = async () => {
     try {
-        let query = supabaseClient
-            .from('delima_salinan_admin')
-            .select('id, kod_sekolah, nama_sekolah, nama_penuh, emel, ou, kategori, status');
-
-        // Jika Kod Sekolah dibekalkan, lakukan penapisan.
-        // Ini adalah amalan terbaik (Best Practice) untuk mengurangkan beban *payload*.
-        if (kodSekolah) {
-            query = query.eq('kod_sekolah', kodSekolah);
-        }
-
-        // Jalankan query (Secara lalai, Supabase mengehadkan kepada 1000 rekod. 
-        // Jika perlu lebih, logik pagination perlu ditambah di masa hadapan)
-        const { data, error } = await query;
+        // Tarik hanya lajur yang diperlukan untuk mengurangkan muatan (payload). READ-ONLY.
+        const { data, error } = await supabaseClient
+            .from('delima_data_sekolah')
+            .select('kod_ou, nama_sekolah')
+            .order('nama_sekolah', { ascending: true }); // Susun ikut abjad untuk UI yang kemas
 
         if (error) {
-            throw new Error(`Gagal menarik data dari Supabase: ${error.message}`);
+            throw new Error(`Gagal menarik senarai sekolah: ${error.message}`);
         }
 
         return data || [];
-
     } catch (err) {
-        console.error("Ralat Fetch Data:", err);
-        // Lontarkan semula ralat supaya boleh ditangkap oleh UI Logger
-        throw err; 
+        console.error("Ralat Fetch Schools:", err);
+        throw err;
     }
 };
 
-// Eksport klien utama jika modul lain memerlukan akses secara langsung (contohnya untuk Realtime subscription)
+/**
+ * Menarik senarai data pelajar dari jadual 'delima_salinan_admin'.
+ * Fungsi ini kini akan menarik berdasarkan kod_ou yang dipilih oleh pengguna (Peringkat 1).
+ * * @param {string} kodOU - Kod OU sekolah yang dipilih dari dropdown.
+ * @returns {Promise<Array>} - Tatasusunan (Array) objek data dari Supabase.
+ */
+export const fetchDelimaDataByOU = async (kodOU) => {
+    try {
+        if (!kodOU) throw new Error("Parameter kod OU diperlukan untuk penarikan data spesifik.");
+
+        // Tarik rekod pelajar berdasarkan Kod OU yang dipilih. READ-ONLY.
+        const { data, error } = await supabaseClient
+            .from('delima_salinan_admin')
+            .select('id, kod_sekolah, nama_sekolah, nama_penuh, emel, ou, kategori, status')
+            .ilike('ou', `%${kodOU}%`); // Guna ILIKE (contains) jika struktur ou seperti /JPN/MELAKA/M020/SEKOLAH-1234
+
+        if (error) {
+            throw new Error(`Gagal menarik data sekolah spesifik: ${error.message}`);
+        }
+
+        return data || [];
+    } catch (err) {
+        console.error("Ralat Fetch Data By OU:", err);
+        throw err;
+    }
+};
+
+/**
+ * [BARU] Menarik data tambahan untuk nama-nama yang GAGAL dipadankan pada Peringkat 1 (Peringkat 2 / Fallback).
+ * Fungsi ini menggunakan kaedah 'Chunking' (kumpulan kecil) untuk tidak melepasi had URL Request dan RAM.
+ * * @param {Array<string>} namesArray - Senarai nama-nama yang belum dijumpai.
+ * @returns {Promise<Array>} - Rekod tambahan dari seluruh jadual untuk nama-nama tersebut sahaja.
+ */
+export const fetchFallbackData = async (namesArray) => {
+    try {
+        if (!namesArray || namesArray.length === 0) return [];
+
+        let allFallbackData = [];
+        const chunkSize = 50; // Hadkan carian IN clause kepada 50 nama pada satu-satu masa.
+
+        for (let i = 0; i < namesArray.length; i += chunkSize) {
+            const chunk = namesArray.slice(i, i + chunkSize);
+            
+            // Carian berdasarkan nama secara global. READ-ONLY.
+            const { data, error } = await supabaseClient
+                .from('delima_salinan_admin')
+                .select('id, kod_sekolah, nama_sekolah, nama_penuh, emel, ou, kategori, status')
+                .in('nama_penuh', chunk); // Array pencarian
+
+            if (error) {
+                console.warn("Amaran Fallback Fetch (Chunk):", error.message);
+                continue; // Teruskan ke chunk seterusnya jika ralat
+            }
+
+            if (data && data.length > 0) {
+                allFallbackData = allFallbackData.concat(data);
+            }
+        }
+
+        return allFallbackData;
+    } catch (err) {
+        console.error("Ralat Kritikal Fallback Fetch:", err);
+        // Kita tidak 'throw' error di sini untuk membenarkan hasil padanan Peringkat 1 tetap dipaparkan walaupun Fallback gagal
+        return []; 
+    }
+};
+
+// Eksport klien utama jika modul lain memerlukan akses secara langsung
 export { supabaseClient };

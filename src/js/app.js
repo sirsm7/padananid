@@ -1,30 +1,27 @@
 /**
  * Modul: Pengawal Utama Sistem (App Controller)
  * Folder: /src/js/app.js
- * Fungsi: Mengkoordinasi antara UI, Data, dan Enjin Padanan. Menangani kitaran logik sistem.
- * Arkitek: Pro Web Caster (Migrasi ke Standalone Client-Side)
+ * Fungsi: Mengkoordinasi Aliran Data Berperingkat (Two-Pass).
+ * Arkitek: Pro Web Caster
  */
 
 import { 
-    UI, 
-    logMessage, 
-    clearLogs, 
-    updateDbStatus, 
-    showFileInfo, 
-    updateProgress, 
-    renderTable, 
-    updateStats 
+    UI, logMessage, clearLogs, updateDbStatus, showFileInfo, 
+    updateProgress, renderTable, updateStats, populateSchoolDropdown 
 } from './ui/dom.js';
 
-import { checkSupabaseConnection, fetchDelimaData } from './services/supabase.js';
-import { executeMatching } from './core/matcher.js';
+import { 
+    checkSupabaseConnection, fetchSchoolsList, fetchDelimaDataByOU, fetchFallbackData 
+} from './services/supabase.js';
+
+import { executePhase1, executePhase2 } from './core/matcher.js';
 
 // ============================================================================
 // PENGURUSAN KEADAAN (STATE MANAGEMENT)
 // ============================================================================
 let currentCsvFile = null;
 let finalMatchResults = [];
-let processedUploadData = null; // Tambahan: Simpan data yang telah diproses dari fail Excel/CSV
+let processedUploadData = null; 
 
 // ============================================================================
 // INISIALISASI SISTEM
@@ -32,17 +29,26 @@ let processedUploadData = null; // Tambahan: Simpan data yang telah diproses dar
 document.addEventListener('DOMContentLoaded', async () => {
     logMessage('Sistem memulakan proses inisialisasi...', 'info');
     
-    // 1. Semak Ketersambungan Pangkalan Data Supabase
+    // 1. Semak Ketersambungan
     const isDbConnected = await checkSupabaseConnection();
     updateDbStatus(isDbConnected);
     
     if (isDbConnected) {
         logMessage('Pangkalan data Supabase berjaya disambungkan.', 'success');
+        
+        // [BARU] 2. Muat turun senarai sekolah untuk Dropdown
+        try {
+            logMessage('Memuat turun senarai sekolah...', 'info');
+            const schools = await fetchSchoolsList();
+            populateSchoolDropdown(schools);
+            logMessage(`${schools.length} sekolah sedia untuk dipilih.`, 'success');
+        } catch (err) {
+            logMessage('Gagal memuat turun senarai sekolah: ' + err.message, 'error');
+        }
     } else {
-        logMessage('Gagal menyambung ke pangkalan data Supabase. Sila semak konfigurasi (URL/Key).', 'error');
+        logMessage('Gagal menyambung ke pangkalan data Supabase. Sila semak konfigurasi.', 'error');
     }
 
-    // 2. Pasang Pendengar Peristiwa (Event Listeners)
     setupEventListeners();
 });
 
@@ -50,17 +56,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 // PENGENDALIAN PERISTIWA (EVENT LISTENERS)
 // ============================================================================
 const setupEventListeners = () => {
-    // A. Pengendalian Log
     UI.btnClearLogs.addEventListener('click', clearLogs);
-
-    // B. Pengendalian Butang Tindakan
     UI.btnProcess.addEventListener('click', handleDataProcessing);
     UI.btnDownload.addEventListener('click', handleDownloadResults);
-
-    // C. Pengendalian Muat Naik Fail (Input Biasa)
     UI.fileInput.addEventListener('change', (e) => processFileSelection(e.target.files[0]));
 
-    // D. Pengendalian Seret & Lepas (Drag and Drop)
     UI.dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         UI.dropZone.classList.add('border-brand-500', 'bg-brand-50');
@@ -74,7 +74,6 @@ const setupEventListeners = () => {
     UI.dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         UI.dropZone.classList.remove('border-brand-500', 'bg-brand-50');
-        
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             processFileSelection(e.dataTransfer.files[0]);
         }
@@ -89,68 +88,50 @@ const processFileSelection = (file) => {
 
     const fileName = file.name.toLowerCase();
     
-    // Pengesahan Format (Dikemas kini untuk Excel)
     if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
-        logMessage(`Penolakan Fail: "${file.name}" tidak disokong. Sila gunakan format .CSV atau Excel (.XLSX/.XLS)`, 'error');
+        logMessage(`Penolakan Fail: "${file.name}" tidak disokong. Sila gunakan format .CSV atau Excel.`, 'error');
         return;
     }
 
     currentCsvFile = file;
 
-    // Logik Pemprosesan Berdasarkan Jenis Fail
     if (fileName.endsWith('.csv')) {
-        // Gunakan PapaParse untuk fail CSV
         window.Papa.parse(file, {
             header: false,
             skipEmptyLines: true,
             complete: (results) => {
                 const rowCount = results.data.length;
-                processedUploadData = results.data; // Simpan ke pembolehubah global
+                processedUploadData = results.data; 
                 showFileInfo(file.name, rowCount);
-                logMessage(`Fail CSV "${file.name}" dimuat naik (${rowCount} baris dikesan). Sedia untuk proses.`, 'info');
+                logMessage(`Fail CSV "${file.name}" sedia diproses.`, 'info');
             },
-            error: (err) => {
-                logMessage(`Ralat membaca fail CSV: ${err.message}`, 'error');
-            }
+            error: (err) => logMessage(`Ralat CSV: ${err.message}`, 'error')
         });
     } else {
-        // Gunakan SheetJS untuk fail Excel (.xlsx, .xls)
         const reader = new FileReader();
-        
         reader.onload = (e) => {
             try {
                 const data = new Uint8Array(e.target.result);
-                // Baca buku kerja Excel
                 const workbook = window.XLSX.read(data, { type: 'array' });
-                
-                // Ambil helaian (worksheet) pertama
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
                 
-                // Tukar kepada format matriks 2D (Sama seperti PapaParse)
-                // { header: 1 } memaksa output menjadi Array of Arrays
                 const jsonArray = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false });
                 
-                const rowCount = jsonArray.length;
-                processedUploadData = jsonArray; // Simpan ke pembolehubah global
-                showFileInfo(file.name, rowCount);
-                logMessage(`Fail Excel "${file.name}" dimuat naik (${rowCount} baris dikesan pada helaian "${firstSheetName}"). Sedia untuk proses.`, 'info');
+                processedUploadData = jsonArray;
+                showFileInfo(file.name, jsonArray.length);
+                logMessage(`Fail Excel "${file.name}" sedia diproses.`, 'info');
                 
             } catch (err) {
-                logMessage(`Ralat membaca fail Excel: Sila pastikan fail tidak rosak. Mesej: ${err.message}`, 'error');
+                logMessage(`Ralat Excel: ${err.message}`, 'error');
             }
         };
-        
-        reader.onerror = () => {
-            logMessage("Ralat semasa membaca fail dari sistem.", 'error');
-        };
-        
         reader.readAsArrayBuffer(file);
     }
 };
 
 // ============================================================================
-// LOGIK TERAS: PROSES PADANAN (MATCHING)
+// LOGIK TERAS: PROSES PADANAN (TWO-PASS)
 // ============================================================================
 const handleDataProcessing = async () => {
     if (!currentCsvFile || !processedUploadData) {
@@ -158,47 +139,60 @@ const handleDataProcessing = async () => {
         return;
     }
 
+    const selectedOU = UI.schoolSelector.value;
+    if (!selectedOU) {
+        logMessage('Sila pilih sekolah anda dari senarai (Langkah 1) sebelum memulakan padanan.', 'warning');
+        UI.schoolSelector.focus();
+        return;
+    }
+
     try {
-        // Kunci UI
         UI.btnProcess.disabled = true;
         UI.btnDownload.disabled = true;
-        logMessage('Memulakan sesi padanan data...', 'info');
+        UI.schoolSelector.disabled = true;
         
-        // Fasa 1: Baca data dari memori (Sudah dibaca semasa 'processFileSelection')
-        updateProgress(10, `Membaca data tempatan dari fail ${currentCsvFile.name}...`);
-        const uploadData = processedUploadData;
-
-        // Fasa 2: Tarik Data dari Supabase
-        updateProgress(40, 'Menarik data dari Supabase (Sila tunggu)...');
-        logMessage('Menjalankan API Request ke Supabase...', 'info');
-        const supabaseData = await fetchDelimaData();
-        logMessage(`Berjaya menarik ${supabaseData.length} rekod rujukan dari pangkalan data.`, 'success');
-
-        // Fasa 3: Laksanakan Enjin Padanan
-        updateProgress(70, 'Melaksanakan logik padanan nama...');
-        const { results, stats } = executeMatching(uploadData, supabaseData); // Tukar csvData ke uploadData
+        logMessage('Memulakan sesi padanan berperingkat...', 'info');
         
-        // Simpan hasil ke memori global untuk muat turun
-        finalMatchResults = results;
+        // TAHAP 1: Padanan Kod Sekolah (OU)
+        updateProgress(20, 'Menarik data sekolah dari Supabase...');
+        const primaryData = await fetchDelimaDataByOU(selectedOU);
+        logMessage(`Berjaya menarik ${primaryData.length} rekod rujukan khusus untuk sekolah ini.`, 'success');
 
-        // Fasa 4: Render UI
-        updateProgress(90, 'Mengemas kini antaramuka dan jadual...');
-        renderTable(results);
-        updateStats(stats);
+        updateProgress(40, 'Melaksanakan Padanan Peringkat 1...');
+        const phase1Data = executePhase1(processedUploadData, primaryData);
+        logMessage(`Fasa 1 Selesai. ${phase1Data.stats.successPhase1} padanan tepat dijumpai. ${phase1Data.stats.failedPhase1} rekod gagal.`, 'info');
 
-        // Tamat
+        let finalData = { results: phase1Data.matchedResults, stats: phase1Data.stats };
+
+        // TAHAP 2: Carian Global (Fallback) jika ada nama yang gagal
+        if (phase1Data.unmatchedNames.length > 0) {
+            updateProgress(60, 'Mencari rekod yang gagal di seluruh pangkalan data (Fallback)...');
+            logMessage(`Melaksanakan carian fallback untuk ${phase1Data.unmatchedNames.length} nama...`, 'info');
+            
+            const fallbackData = await fetchFallbackData(phase1Data.unmatchedNames);
+            
+            updateProgress(80, 'Melaksanakan Padanan Peringkat 2...');
+            finalData = executePhase2(phase1Data.unmatchedRows, fallbackData, phase1Data.matchedResults, phase1Data.stats);
+        }
+
+        finalMatchResults = finalData.results;
+
+        // KEMAS KINI UI
+        updateProgress(90, 'Mengemas kini antaramuka...');
+        renderTable(finalData.results);
+        updateStats(finalData.stats);
+
         updateProgress(100, 'Proses selesai sepenuhnya');
-        logMessage(`Padanan Selesai! Berjaya: ${stats.success} | Gagal: ${stats.failed}`, 'success');
+        logMessage(`Padanan Selesai! Berjaya: ${finalData.stats.success} | Gagal: ${finalData.stats.failed}`, 'success');
         
-        // Buka butang muat turun
         UI.btnDownload.disabled = false;
 
     } catch (error) {
         logMessage(`[RALAT KRITIKAL] Operasi dihentikan: ${error.message}`, 'error');
         updateProgress(0, 'Ralat Berlaku');
     } finally {
-        // Buka semula butang proses
         UI.btnProcess.disabled = false;
+        UI.schoolSelector.disabled = false;
     }
 };
 
@@ -206,29 +200,24 @@ const handleDataProcessing = async () => {
 // LOGIK MUAT TURUN HASIL PADANAN (EXPORT)
 // ============================================================================
 const handleDownloadResults = () => {
-    if (!finalMatchResults || finalMatchResults.length === 0) {
-        logMessage('Tiada hasil padanan untuk dimuat turun.', 'warning');
-        return;
-    }
+    if (!finalMatchResults || finalMatchResults.length === 0) return;
 
     logMessage('Menjana fail CSV hasil padanan...', 'info');
 
-    // Menukar format struktur untuk eksport CSV
+    // [KEMASKINI] Menyertakan lajur Nama Sekolah dalam hasil eksport
     const exportFormat = finalMatchResults.map((row, index) => ({
         'Bil': index + 1,
         'Nama APDM (Asal)': row.originalName,
-        'Nama DELIMa (Pangkalan Data)': row.dbName,
+        'Nama DELIMa': row.dbName,
         'Emel DELIMa': row.email,
-        'Kod Sekolah / OU': row.ou,
+        'Kod OU (ID Sekolah)': row.ou,
+        'Nama Sekolah': row.namaSekolah,
         'Kategori': row.kategori,
         'Status Padanan': row.status
     }));
 
-    // Generate teks CSV menggunakan PapaParse
     const csvString = window.Papa.unparse(exportFormat);
-    
-    // Cipta objek Blob untuk memulakan muat turun di pelayar pengguna
-    const blob = new Blob(["\ufeff", csvString], { type: 'text/csv;charset=utf-8;' }); // Menambah BOM (\ufeff) untuk sokongan Excel UTF-8
+    const blob = new Blob(["\ufeff", csvString], { type: 'text/csv;charset=utf-8;' }); 
     const url = URL.createObjectURL(blob);
     
     const downloadLink = document.createElement("a");
