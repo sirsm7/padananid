@@ -1,12 +1,12 @@
 /**
  * Modul: Manipulasi DOM (UI)
  * Folder: /src/js/ui/dom.js
- * Fungsi: Mengurus interaksi, kemas kini UI, senarai dropdown sekolah, dan jadual.
+ * Fungsi: Mengurus interaksi, kemas kini UI, logik dropdown carian sekolah, dan jadual.
  * Arkitek: Pro Web Caster
  */
 
 // ============================================================================
-// ELEMEN CACHE
+// ELEMEN CACHE & STATE GLOBAL UI
 // ============================================================================
 export const UI = {
     dbBadge: document.getElementById('dbStatusBadge'),
@@ -17,7 +17,14 @@ export const UI = {
     
     fileInput: document.getElementById('csvFileInput'),
     dropZone: document.getElementById('dropZone'),
-    schoolSelector: document.getElementById('schoolSelector'), // [BARU]
+    
+    // Elemen Dropdown Kustom
+    schoolSearchInput: document.getElementById('schoolSearchInput'),
+    selectedSchoolOU: document.getElementById('selectedSchoolOU'),
+    schoolDropdownList: document.getElementById('schoolDropdownList'),
+    btnClearSchool: document.getElementById('btnClearSchool'),
+    iconDropdown: document.getElementById('iconDropdown'),
+    schoolDropdownContainer: document.getElementById('schoolDropdownContainer'),
     
     btnProcess: document.getElementById('btnProcess'),
     btnDownload: document.getElementById('btnDownload'),
@@ -32,6 +39,12 @@ export const UI = {
     tableBody: document.getElementById('resultsTableBody')
 };
 
+// Simpanan memori senarai sekolah untuk carian pantas
+let globalSchoolsList = [];
+
+// ============================================================================
+// FUNGSI LOG DAN STATUS
+// ============================================================================
 export const logMessage = (message, type = 'info') => {
     if (!UI.logContainer) return;
     const entry = document.createElement('div');
@@ -66,26 +79,112 @@ export const updateDbStatus = (isConnected) => {
     }
 };
 
-/**
- * [BARU] Mengisi dropdown sekolah dengan data dari pangkalan data.
- */
+// ============================================================================
+// FUNGSI DROPDOWN CARIAN SEKOLAH (CUSTOM AUTOCOMPLETE)
+// ============================================================================
 export const populateSchoolDropdown = (schools) => {
-    if (!UI.schoolSelector) return;
+    globalSchoolsList = schools;
     
-    UI.schoolSelector.innerHTML = '<option value="">-- Sila Pilih Sekolah Anda --</option>';
+    if (UI.schoolSearchInput) {
+        UI.schoolSearchInput.disabled = false;
+        UI.schoolSearchInput.placeholder = "Cari nama sekolah atau kod...";
+    }
     
-    schools.forEach(school => {
-        if (school.kod_ou && school.nama_sekolah) {
-            const option = document.createElement('option');
-            option.value = school.kod_ou;
-            option.textContent = school.nama_sekolah;
-            UI.schoolSelector.appendChild(option);
-        }
-    });
-
-    UI.schoolSelector.disabled = false;
+    renderDropdownOptions(globalSchoolsList);
+    setupDropdownListeners();
 };
 
+const renderDropdownOptions = (schoolsToRender) => {
+    if (!UI.schoolDropdownList) return;
+    
+    UI.schoolDropdownList.innerHTML = '';
+    
+    if (schoolsToRender.length === 0) {
+        UI.schoolDropdownList.innerHTML = `<li class="relative cursor-default select-none py-2 pl-3 pr-9 text-slate-500">Tiada sekolah dijumpai</li>`;
+        return;
+    }
+
+    schoolsToRender.forEach(school => {
+        if (school.kod_ou && school.nama_sekolah) {
+            const li = document.createElement('li');
+            li.className = 'relative cursor-pointer select-none py-2 pl-3 pr-9 text-slate-900 hover:bg-brand-50 hover:text-brand-600';
+            li.innerHTML = `<span class="block truncate">${school.nama_sekolah} <span class="text-xs text-slate-400">(${school.kod_ou})</span></span>`;
+            
+            // Peristiwa klik untuk memilih sekolah
+            li.addEventListener('mousedown', () => {
+                selectSchool(school.nama_sekolah, school.kod_ou);
+            });
+            
+            UI.schoolDropdownList.appendChild(li);
+        }
+    });
+};
+
+const selectSchool = (namaSekolah, kodOU) => {
+    UI.schoolSearchInput.value = namaSekolah;
+    UI.selectedSchoolOU.value = kodOU;
+    UI.schoolDropdownList.classList.add('hidden');
+    
+    // Tunjuk butang pangkah (clear)
+    UI.btnClearSchool.classList.remove('hidden');
+    UI.iconDropdown.classList.add('hidden');
+};
+
+const setupDropdownListeners = () => {
+    // 1. Carian bila menaip (Filter)
+    UI.schoolSearchInput.addEventListener('input', (e) => {
+        const searchText = e.target.value.toLowerCase();
+        
+        // Reset nilai rahsia jika pengguna menaip semula
+        UI.selectedSchoolOU.value = '';
+        UI.btnClearSchool.classList.add('hidden');
+        UI.iconDropdown.classList.remove('hidden');
+
+        const filtered = globalSchoolsList.filter(s => 
+            (s.nama_sekolah && s.nama_sekolah.toLowerCase().includes(searchText)) ||
+            (s.kod_ou && s.kod_ou.toLowerCase().includes(searchText))
+        );
+        
+        renderDropdownOptions(filtered);
+        UI.schoolDropdownList.classList.remove('hidden');
+    });
+
+    // 2. Papar senarai bila kotak carian ditekan (Focus)
+    UI.schoolSearchInput.addEventListener('focus', () => {
+        const searchText = UI.schoolSearchInput.value.toLowerCase();
+        if (!searchText) {
+            renderDropdownOptions(globalSchoolsList); // Papar semua jika kosong
+        }
+        UI.schoolDropdownList.classList.remove('hidden');
+    });
+
+    // 3. Sembunyi senarai bila hilang fokus (Blur)
+    UI.schoolSearchInput.addEventListener('blur', () => {
+        // Guna setTimeout agar event 'mousedown' pada <li> sempat berjalan
+        setTimeout(() => {
+            UI.schoolDropdownList.classList.add('hidden');
+        }, 150);
+    });
+
+    // 4. Butang pangkah (Clear)
+    UI.btnClearSchool.addEventListener('click', () => {
+        UI.schoolSearchInput.value = '';
+        UI.selectedSchoolOU.value = '';
+        UI.btnClearSchool.classList.add('hidden');
+        UI.iconDropdown.classList.remove('hidden');
+        renderDropdownOptions(globalSchoolsList);
+        UI.schoolSearchInput.focus();
+    });
+};
+
+// Fungsi bantuan (Getter) untuk App.js
+export const getSelectedSchoolOU = () => {
+    return UI.selectedSchoolOU ? UI.selectedSchoolOU.value : '';
+};
+
+// ============================================================================
+// FUNGSI LAIN-LAIN
+// ============================================================================
 export const showFileInfo = (fileName, count) => {
     if (UI.fileInfo && UI.fileNameDisplay && UI.rowCountDisplay) {
         UI.fileNameDisplay.textContent = fileName;
@@ -105,9 +204,6 @@ export const updateProgress = (percentage, label) => {
     if (UI.progressLabel && label) UI.progressLabel.textContent = label;
 };
 
-/**
- * [KEMASKINI] Jadual kini menyertakan lajur 'Nama Sekolah'
- */
 export const renderTable = (results) => {
     if (!UI.tableBody) return;
     UI.tableBody.innerHTML = ''; 
