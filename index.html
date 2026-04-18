@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistem Padanan Data DELIMa (Hibrid V2)</title>
+    <title>Sistem Padanan Data DELIMa</title>
     
     <!-- Tailwind CSS (via CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -56,7 +56,7 @@
             </p>
         </div>
 
-        <!-- LANGKAH 1: File Upload Card (Dulu Langkah 2) -->
+        <!-- LANGKAH 1: File Upload Card -->
         <div class="bg-white shadow rounded-lg mb-8 border border-gray-200 transition-opacity duration-300" id="step1Container">
             <div class="px-4 py-5 sm:p-6">
                 <h3 class="text-lg leading-6 font-medium text-gray-900 mb-2">
@@ -95,14 +95,13 @@
                             <span id="fileNameDisplay" class="text-sm font-medium text-green-800">fail.xlsx</span>
                             <span id="recordCountDisplay" class="ml-2 text-xs text-green-600">(0 rekod dibaca)</span>
                         </div>
-                        <!-- Butang batal muat naik jika tersilap -->
                         <button id="cancelUploadBtn" class="text-xs text-red-500 hover:text-red-700 font-medium">Batal</button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- LANGKAH 2: School Selection Card (Dulu Langkah 1) - Dikunci pada mulanya -->
+        <!-- LANGKAH 2: School Selection Card - Dikunci pada mulanya -->
         <div id="step2Container" class="bg-white shadow rounded-lg mb-8 border border-gray-200 opacity-50 pointer-events-none transition-opacity duration-300">
             <div class="px-4 py-5 sm:p-6">
                 <div class="flex justify-between items-start mb-2">
@@ -120,20 +119,18 @@
                     <p>Sila pilih nama sekolah untuk skop carian. Sistem akan memadankan data muat naik anda dengan data <strong>kod OU sekolah terpilih dahulu</strong>, dan mencari ke <strong>seluruh pangkalan data</strong> jika terdapat nama yang gagal dijumpai.</p>
                 </div>
                 
-                <!-- School Search Interface -->
+                <!-- School Search Interface (Kemas Kini Datalist) -->
                 <div class="flex flex-col sm:flex-row gap-3">
                     <div class="flex-grow relative">
-                        <input type="text" id="schoolSearchInput" placeholder="Taip nama sekolah atau kod sekolah..." 
-                            class="shadow-sm focus:ring-secondary focus:border-secondary block w-full sm:text-sm border-gray-300 rounded-md p-3 border"
+                        <input type="text" id="schoolSearchInput" list="schoolDataList" placeholder="Taip nama sekolah atau kod sekolah..." 
+                            class="shadow-sm focus:ring-secondary focus:border-secondary block w-full sm:text-sm border-gray-300 rounded-md p-3 border truncate transition-shadow"
                             autocomplete="off">
-                        <!-- Dropdown Results (Hidden by default) -->
-                        <div id="schoolDropdown" class="absolute z-10 w-full mt-1 bg-white shadow-lg max-h-60 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none sm:text-sm hidden">
-                            <ul id="schoolList" class="divide-y divide-gray-100">
-                                <!-- List items injected by JS -->
-                            </ul>
-                        </div>
+                        <!-- Native HTML Datalist -->
+                        <datalist id="schoolDataList">
+                            <!-- Options akan dimasukkan melalui DOM Javascript -->
+                        </datalist>
                     </div>
-                    <!-- Butang ini akan mencetuskan rantaian proses fetch -> match -->
+                    <!-- Butang Mula Padanan -->
                     <button id="startMatchBtn" type="button" class="inline-flex items-center justify-center px-6 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary hover:bg-blue-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                         Mula Padanan
                     </button>
@@ -215,7 +212,7 @@
         <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 md:flex md:items-center md:justify-between lg:px-8">
             <div class="mt-8 md:mt-0 md:order-1 text-center w-full">
                 <p class="text-base text-gray-400">
-                    &copy; 2026 Pro Web Caster. Architecture by Design. Strict SoC Enforced.
+                    &copy; 2026 USTP PPD Alor Gajah
                 </p>
             </div>
         </div>
