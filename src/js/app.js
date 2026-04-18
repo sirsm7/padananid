@@ -1,18 +1,22 @@
 /**
- * Modul: Pengawal Aplikasi Utama (Main Controller) V2
+ * Modul: Pengawal Aplikasi Utama (Main Controller) V3
  * Folder: /src/js/app.js
- * Fungsi: Mengurus kitaran hayat aplikasi, state (keadaan) data, dan event listeners DOM.
- * Arkitek: Pro Web Caster (Aliran V2: Muat Naik -> Pilih Sekolah -> Padan)
- * Kemas kini: Penyatuan elemen native <datalist> (Seni Bina SoC).
+ * Fungsi: Menguruskan kitaran hayat aplikasi, penyelarasan data antara modul, dan tindak balas DOM.
+ * Arkitek: Pro Web Caster (Zero-Hallucination Architecture)
  */
 
-// ============================================================================
-// IMPORT MODUL (ES6 Modules)
-// ============================================================================
-import { fetchSchoolsList, fetchSchoolData, fetchGlobalMatch } from './api.js';
+// ============================================================================\
+// IMPORT MODUL (Standard ES6 Modules)
+// ============================================================================\
+import { 
+    fetchSchoolsList, 
+    fetchSchoolData, 
+    fetchGlobalMatch 
+} from './api.js';
+
 import { 
     UI, 
-    populateSchoolDataList, // Diimport baharu dari ui.js 
+    populateSchoolDataList, 
     showSelectedSchool, 
     highlightDropzone, 
     unhighlightDropzone, 
@@ -24,232 +28,183 @@ import {
     resetFullSystemUI,
     resetFileUploadUI
 } from './ui.js';
+
 import { runMatchingEngine } from './matcher.js';
 import { readExcelFile, exportToCSV } from './fileHandler.js';
 
-// ============================================================================
+// ============================================================================\
 // KEADAAN SISTEM (APPLICATION STATE)
-// ============================================================================
+// ============================================================================\
 const AppState = {
-    allSchools: [],          // Menyimpan senarai sekolah dari API
-    selectedSchool: null,    // Menyimpan objek sekolah terpilih
-    uploadedExcelData: [],   // Menyimpan data JSON fail Excel/CSV muat naik (Langkah 1)
-    originalFileName: '',    // Menyimpan nama fail muat naik untuk nama eksport
-    finalMatchedData: null   // Menyimpan hasil akhir padanan
+    allSchools: [],          // Senarai lengkap sekolah (kod_ou, nama_sekolah)
+    selectedSchool: null,    // Sekolah yang dipilih pengguna dari datalist
+    uploadedExcelData: [],   // Data mentah dari CSV/Excel
+    finalMatchedData: [],    // Data yang telah siap diproses (Result)
+    isProcessing: false,
+    originalFileName: ''
 };
 
-// ============================================================================
-// FUNGSI INIT (BOOTSTRAPPING)
-// ============================================================================
-document.addEventListener('DOMContentLoaded', async () => {
-    console.log("Pro Web Caster: Memulakan sistem Hibrid V2...");
-    
-    // Bind semua event listener
-    setupEventListeners();
-
-    // Dapatkan senarai sekolah semasa aplikasi dibuka (di belakang tabir)
-    try {
-        UI.schoolSearchInput.placeholder = "Memuat turun senarai sekolah...";
-        UI.schoolSearchInput.disabled = true;
-        
-        AppState.allSchools = await fetchSchoolsList();
-        
-        // Isikan terus ke dalam <datalist> secara pukal (Native DOM)
-        populateSchoolDataList(AppState.allSchools);
-        
-        UI.schoolSearchInput.placeholder = "Taip nama sekolah atau kod sekolah...";
-        UI.schoolSearchInput.disabled = false;
-        console.log(`Berjaya memuatkan ${AppState.allSchools.length} sekolah ke dalam Datalist.`);
-    } catch (error) {
-        console.error("Gagal memulakan senarai sekolah:", error);
-        UI.schoolSearchInput.placeholder = "Gagal memuat turun data sekolah.";
-    }
-});
-
-// ============================================================================
-// PENGIKATAN PERISTIWA (EVENT LISTENERS)
-// ============================================================================
-function setupEventListeners() {
-    
-    // --- LANGKAH 1: DRAG & DROP FAIL ---
-    UI.dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        highlightDropzone();
-    });
-
-    UI.dropzone.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        unhighlightDropzone();
-    });
-
-    UI.dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        unhighlightDropzone();
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            handleFileUpload(e.dataTransfer.files[0]);
-        }
-    });
-
-    // --- LANGKAH 1: KLIK MUAT NAIK FAIL ---
-    UI.fileInput.addEventListener('change', (e) => {
-        if (e.target.files && e.target.files.length > 0) {
-            handleFileUpload(e.target.files[0]);
-        }
-    });
-
-    // --- LANGKAH 1: BATAL MUAT NAIK ---
-    UI.cancelUploadBtn.addEventListener('click', () => {
-        AppState.uploadedExcelData = [];
-        AppState.originalFileName = '';
-        resetFileUploadUI();
-    });
-
-    // --- LANGKAH 2: PILIHAN SEKOLAH DARI DATALIST ---
-    // Menggunakan 'change' untuk menangkap pilihan dari Datalist secara natif
-    UI.schoolSearchInput.addEventListener('change', handleSchoolSelection);
-
-    // --- LANGKAH 2: MULA PADANAN (Cetus API -> Matcher) ---
-    UI.startMatchBtn.addEventListener('click', handleStartMatchingProcess);
-
-    // --- LANGKAH 3: MUAT TURUN HASIL ---
-    UI.downloadResultBtn.addEventListener('click', () => {
-        if (AppState.finalMatchedData) {
-            exportToCSV(AppState.finalMatchedData, AppState.originalFileName);
-        }
-    });
-
-    // --- LANGKAH 3: RESET SISTEM ---
-    UI.resetSystemBtn.addEventListener('click', () => {
-        AppState.uploadedExcelData = [];
-        AppState.originalFileName = '';
-        AppState.selectedSchool = null;
-        AppState.finalMatchedData = null;
-        resetFullSystemUI();
-    });
-}
-
-// ============================================================================
-// PENGENDALI LOGIK (LOGIC HANDLERS)
-// ============================================================================
+// ============================================================================\
+// FUNGSI UTAMA (LOGIK PERNIAGAAN)
+// ============================================================================\
 
 /**
- * PENGENDALI LANGKAH 1: Pembacaan fail tempatan ke memori pelayar
+ * Inisialisasi Aplikasi
+ * Memuatkan senarai sekolah dari API Supabase semasa halaman dimuatkan.
+ */
+async function initApp() {
+    console.log("🚀 Inisialisasi Sistem Padanan ID V3...");
+    try {
+        const schools = await fetchSchoolsList();
+        if (schools && schools.length > 0) {
+            AppState.allSchools = schools;
+            populateSchoolDataList(schools);
+            console.log(`✅ ${schools.length} sekolah berjaya dimuatkan.`);
+        }
+    } catch (error) {
+        console.error("❌ Kegagalan inisialisasi:", error);
+    }
+}
+
+/**
+ * Pengendali Muat Naik Fail
  */
 async function handleFileUpload(file) {
+    if (!file) return;
+
     try {
-        showProgress("Membaca Fail", "Menukar format Excel/CSV kepada data sistem...");
-        
-        // Guna File Handler untuk parse Excel
+        AppState.originalFileName = file.name;
         const data = await readExcelFile(file);
         
-        AppState.uploadedExcelData = data;
-        AppState.originalFileName = file.name;
-        
-        hideProgress();
-        showFileInfo(file.name, data.length); // Ini akan unlock Langkah 2 dalam ui.js
-        
+        if (data && data.length > 0) {
+            AppState.uploadedExcelData = data;
+            showFileInfo(file.name, data.length);
+            console.log(`📂 Fail diterima: ${file.name} (${data.length} baris)`);
+        }
     } catch (error) {
-        hideProgress();
-        alert(error.message);
-        resetFileUploadUI();
+        console.error("❌ Ralat membaca fail:", error);
+        alert(`Gagal membaca fail: ${error.message}`);
     }
 }
 
 /**
- * Pengendali apabila pengguna memilih atau menaip nama sekolah di Datalist Input
+ * Logik Enjin Padanan (Triggered by Button)
  */
-function handleSchoolSelection(e) {
-    const selectedValue = e.target.value.trim();
-
-    // Jika pengguna memadam teks
-    if (!selectedValue) {
-        AppState.selectedSchool = null;
-        if(UI.startMatchBtn) {
-            UI.startMatchBtn.disabled = true;
-            UI.startMatchBtn.classList.add('opacity-50', 'cursor-not-allowed');
-        }
-        if(UI.selectedSchoolInfo) UI.selectedSchoolInfo.classList.add('hidden');
-        return;
-    }
-
-    const options = UI.schoolDataList.options;
-    let matchedOption = null;
-
-    // Padankan input teks dengan nilai di dalam <option> Datalist
-    for (let i = 0; i < options.length; i++) {
-        if (options[i].value === selectedValue) {
-            matchedOption = options[i];
-            break;
-        }
-    }
-
-    if (matchedOption) {
-        // Ekstrak data sebenar dari atribut tersembunyi (data-nama, data-ou)
-        const schoolName = matchedOption.getAttribute('data-nama');
-        const schoolOu = matchedOption.getAttribute('data-ou');
-
-        AppState.selectedSchool = {
-            nama_sekolah: schoolName,
-            kod_ou: schoolOu
-        };
-
-        showSelectedSchool(schoolName, schoolOu);
-    } else {
-        // Jika input ditaip secara manual tapi tiada dalam senarai
-        AppState.selectedSchool = null;
-        if(UI.startMatchBtn) {
-            UI.startMatchBtn.disabled = true;
-            UI.startMatchBtn.classList.add('opacity-50', 'cursor-not-allowed');
-        }
-        if(UI.selectedSchoolInfo) UI.selectedSchoolInfo.classList.add('hidden');
-    }
-}
-
-/**
- * PENGENDALI LANGKAH 2 & 3: Orkestrasi Fetch Data Sekolah -> Enjin Padanan
- * Ini adalah fungsi kritikal yang menggabungkan aliran V2.
- */
-async function handleStartMatchingProcess() {
+async function startMatchingProcess() {
+    if (AppState.isProcessing) return;
+    
+    // Validasi input
     if (AppState.uploadedExcelData.length === 0) {
-        alert("Ralat: Sila muat naik fail data terlebih dahulu.");
+        alert("Sila muat naik fail data terlebih dahulu.");
         return;
     }
 
     if (!AppState.selectedSchool) {
-        alert("Ralat: Sila pilih nama sekolah yang sah dari senarai.");
+        alert("Sila pilih nama sekolah yang sah dari senarai.");
         return;
     }
 
     try {
-        // FASA 1: Tarik Data Sekolah (Peringkat 1)
-        showProgress("Mengambil Data Skop Sekolah", `Memuat turun data DELIMa untuk OU: ${AppState.selectedSchool.kod_ou}...`);
-        const localDelimaData = await fetchSchoolData(AppState.selectedSchool.kod_ou);
+        AppState.isProcessing = true;
+        
+        // FASA 1: Tarik Data Skop Sekolah (Tier 1)
+        showProgress("Mengambil Data Skop Sekolah", `Menghubungi Supabase untuk OU: ${AppState.selectedSchool.kod_ou}...`);
+        const localDbData = await fetchSchoolData(AppState.selectedSchool.kod_ou);
 
-        if (localDelimaData.length === 0) {
-            console.warn(`Tiada rekod dijumpai untuk OU ${AppState.selectedSchool.kod_ou}. Sistem akan bergantung sepenuhnya pada carian global.`);
-        }
-
-        // FASA 2: Jalankan Enjin Padanan
-        showProgress("Memulakan Enjin Padanan", "Menganalisis data baris demi baris...");
+        // FASA 2: Jalankan Enjin Padanan (Tier 1 & Tier 2)
+        showProgress("Menjalankan Padanan", "Menganalisis data baris demi baris...");
         
         const result = await runMatchingEngine(
             AppState.uploadedExcelData,
-            localDelimaData,
-            fetchGlobalMatch, // Pass referensi API Peringkat 2
-            updateProgress    // Pass referensi UI Progress
+            localDbData,
+            fetchGlobalMatch, // Callback untuk carian global
+            updateProgress    // Callback untuk kemas kini UI
         );
 
-        // Simpan hasil ke state global
+        // Simpan hasil akhir
         AppState.finalMatchedData = result.finalData;
         
+        // Papar keputusan di UI
         hideProgress();
-        
-        // Papar keputusan
         showResults(result.stats);
         
+        console.log("✅ Proses padanan selesai sepenuhnya.");
+
     } catch (error) {
         hideProgress();
-        console.error("Ralat fatal Sistem Padanan V2:", error);
-        alert(`Berlaku ralat ketika memproses data: ${error.message}`);
+        console.error("❌ Ralat semasa proses padanan:", error);
+        alert("Terjadi ralat kritikal semasa proses padanan. Sila semak konsol.");
+    } finally {
+        AppState.isProcessing = false;
     }
 }
+
+// ============================================================================\
+// PENGENDALI EVENT (EVENT LISTENERS)
+// ============================================================================\
+
+document.addEventListener('DOMContentLoaded', () => {
+    // 1. Jalankan Init
+    initApp();
+
+    // 2. Drag & Drop Events
+    UI.dropzone?.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        highlightDropzone();
+    });
+
+    UI.dropzone?.addEventListener('dragleave', unhighlightDropzone);
+
+    UI.dropzone?.addEventListener('drop', (e) => {
+        e.preventDefault();
+        unhighlightDropzone();
+        const file = e.dataTransfer.files[0];
+        handleFileUpload(file);
+    });
+
+    // 3. File Input Click
+    UI.fileInput?.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        handleFileUpload(file);
+    });
+
+    // 4. Batalkan Muat Naik
+    UI.cancelUploadBtn?.addEventListener('click', () => {
+        AppState.uploadedExcelData = [];
+        resetFileUploadUI();
+    });
+
+    // 5. Pemilihan Sekolah (Input + Datalist Logic)
+    UI.schoolSearchInput?.addEventListener('input', (e) => {
+        const value = e.target.value;
+        // Cari objek sekolah yang tepat dari senarai
+        const found = AppState.allSchools.find(s => s.nama_sekolah === value);
+        
+        if (found) {
+            AppState.selectedSchool = found;
+            showSelectedSchool(found.nama_sekolah, found.kod_ou);
+        } else {
+            AppState.selectedSchool = null;
+        }
+    });
+
+    // 6. Butang Mula Padanan
+    UI.startMatchingBtn?.addEventListener('click', startMatchingProcess);
+
+    // 7. Butang Muat Turun CSV
+    UI.downloadResultBtn?.addEventListener('click', () => {
+        if (AppState.finalMatchedData.length > 0) {
+            exportToCSV(AppState.finalMatchedData, AppState.originalFileName);
+        }
+    });
+
+    // 8. Butang Reset Sistem
+    UI.resetAppBtn?.addEventListener('click', () => {
+        if (confirm("Adakah anda pasti untuk mengosongkan semua data dan memulakan padanan baru?")) {
+            AppState.uploadedExcelData = [];
+            AppState.finalMatchedData = [];
+            AppState.selectedSchool = null;
+            resetFullSystemUI();
+        }
+    });
+});

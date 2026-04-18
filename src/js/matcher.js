@@ -1,169 +1,126 @@
 /**
- * Modul: Enjin Padanan Data (Name-Only Edition)
+ * Modul: Enjin Padanan Data (Zero-Hallucination V3)
  * Folder: /src/js/matcher.js
- * Fungsi: Logik padanan berdasarkan NAMA sahaja mengikut skema Supabase terkini.
- * Arkitek: Pro Web Caster (Zero-Hallucination V3.1)
- * Nota: Lajur IC dibuang kerana tidak wujud dalam skema pangkalan data.
+ * Fungsi: Logik padanan antara CSV (NAMA/IC) dan Supabase (nama_penuh).
+ * Arkitek: Pro Web Caster
  */
 
 /**
- * Normalisasi Nama (Standard GAS / DELIMa)
- * Memastikan perbandingan string adalah kalis ralat (case-insensitive & clean).
+ * Normalisasi Nama (Heuristic Cleaning)
+ * Memastikan perbandingan string adalah kalis ralat walaupun terdapat perbezaan kecil.
  */
 export const normalizeName = (name) => {
     if (!name || typeof name !== 'string') return '';
+    
     let cleanName = name.toUpperCase();
     
-    // Buang bahagian emel jika ada (cth: AHMAD@moe-dl.edu.my)
+    // 1. Buang bahagian emel jika ada (cth: m-123@moe-dl)
     cleanName = cleanName.split('@')[0];
-    cleanName = cleanName.trim();
     
-    // Buang suffix kategori DELIMa yang biasa
-    cleanName = cleanName.replace(/\s*(MOE|KPM[- ]?MURID|KPM[- ]?GURU)$/g, '');
+    // 2. Buang rujukan KPM/MOE yang sering ada di hujung nama dalam DELIMa
+    cleanName = cleanName.replace(/\s*(MOE|KPM[- ]?MURID|KPM[- ]?GURU|G-.*|M-.*)$/g, '');
     
-    // Buang simbol khas kecuali ruang kosong
-    cleanName = cleanName.replace(/[^A-Z0-9\s]/g, '');
+    // 3. Buang aksara khas kecuali ruang (Standard Database Safety)
+    cleanName = cleanName.replace(/[^A-Z\s]/g, '');
     
-    // Buang ruang kosong berlebihan
+    // 4. Tukar berbilang ruang kosong kepada satu ruang sahaja
     cleanName = cleanName.replace(/\s+/g, ' ');
     
     return cleanName.trim();
 };
 
 /**
- * Ekstrak Kod OU
- * Memastikan kod OU yang dipulangkan adalah format angka bersih (jika perlu).
+ * Normalisasi IC
+ * Membuang sempang dan memastikan hanya digit sahaja diproses.
+ */
+export const normalizeIC = (ic) => {
+    if (!ic) return '';
+    return String(ic).replace(/[^0-9]/g, '').trim();
+};
+
+/**
+ * Ekstrak Kod OU dari String
+ * Mengesan 4-7 digit kod sekolah dalam string OU (cth: "1234 - SMK ABC").
  */
 export const extractOU = (ouString) => {
     if (!ouString) return '';
-    const match = String(ouString).match(/\d{4,5}$/);
-    return match ? match[0] : String(ouString);
+    const match = String(ouString).match(/\d+/);
+    return match ? match[0] : ouString;
 };
 
 /**
- * Fungsi Pembantu: Mencari nilai dalam objek berdasarkan senarai kunci yang mungkin.
- * Mengatasi isu lajur CSV yang berbeza-beza (NAMA vs Nama vs NAMA MURID).
+ * ENJIN UTAMA: runMatchingEngine
+ * Memproses padanan baris-demi-baris dengan sistem Tier (Local -> Global).
  */
-const findValueByKeys = (row, possibleKeys) => {
-    const rowKeys = Object.keys(row);
-    for (const pKey of possibleKeys) {
-        const targetKey = rowKeys.find(rKey => 
-            rKey.trim().toUpperCase() === pKey.toUpperCase()
-        );
-        if (targetKey) return row[targetKey];
-    }
-    return null;
-};
-
-/**
- * Enjin Padanan Utama (Skop Nama Sahaja)
- */
-export const runMatchingEngine = async (excelData, localDelimaData, fetchGlobalCallback, progressCallback) => {
-    console.group("🔍 PROSES AUDIT PADANAN (NAME-ONLY) BERMULA");
-    console.log("📊 Data CSV Diterima:", excelData.length, "rekod");
-    console.log("📊 Data API Sekolah (Lokal):", localDelimaData.length, "rekod");
-
+export const runMatchingEngine = async (csvData, localDbData, fetchGlobalMatch, updateProgress) => {
     const stats = {
-        total: excelData.length,
-        successTier1: 0, // Padanan sekolah
-        successTier2: 0, // Padanan global
+        total: csvData.length,
+        successTier1: 0, // Padanan sekolah terpilih
+        successTier2: 0, // Padanan carian global
         failed: 0
     };
 
-    if (!excelData || excelData.length === 0) {
-        console.error("❌ Ralat: Data CSV kosong.");
-        console.groupEnd();
-        return { finalData: excelData, stats };
-    }
-
-    const unmatchedRecords = [];
-    const unmatchedNames = [];
-
-    // ---------------------------------------------------------
-    // PRA-PEMPROSESAN: Bina Hash Map Nama Lokal
-    // ---------------------------------------------------------
+    // 1. Bina Map untuk Data Tempatan (Optimization: O(1) Lookup)
+    // Berdasarkan skema Supabase: Menggunakan 'nama_penuh'
     const localNameMap = new Map();
+    localDbData.forEach(item => {
+        const normName = normalizeName(item.nama_penuh);
+        if (normName) localNameMap.set(normName, item);
+    });
 
-    localDelimaData.forEach((item) => {
-        // Skema Supabase: menggunakan 'nama_penuh'
-        const name = item.nama_penuh || item.nama;
-        const normName = normalizeName(name);
+    const finalData = [];
+    const unmatchedRecords = [];
 
-        if (normName) {
-            // Jika ada nama bertindih, kita ambil yang pertama (boleh ditambah logik keutamaan jika perlu)
-            if (!localNameMap.has(normName)) {
-                localNameMap.set(normName, item);
-            }
+    // 2. TIER 1: Padanan Skop Sekolah (Local Matching)
+    csvData.forEach((row, index) => {
+        // Pengesanan Lajur Dinamik dari CSV
+        const rawName = row['NAMA'] || row['Nama'] || row['nama_penuh'] || '';
+        const rawIc = row['NO. PENGENALAN'] || row['IC'] || row['NO. KP'] || '';
+        
+        const searchName = normalizeName(rawName);
+        const searchIc = normalizeIC(rawIc);
+
+        // Cuba padan nama dalam skop sekolah sedia ada
+        const localMatch = localNameMap.get(searchName);
+
+        if (localMatch) {
+            row['EMEL'] = localMatch.emel || '';
+            row['NAMA SEKOLAH'] = localMatch.nama_sekolah || '';
+            row['KOD OU'] = extractOU(localMatch.ou);
+            row['STATUS PADANAN'] = 'BERJAYA (SKOP SEKOLAH)';
+            stats.successTier1++;
+            finalData.push(row);
+        } else {
+            // Jika gagal Tier 1, simpan untuk Tier 2 (Carian Global)
+            unmatchedRecords.push({ row, searchName, searchIc });
         }
     });
 
-    console.log("🛠️ Map Lokal Dibina (Nama Unik):", localNameMap.size);
-
-    // ---------------------------------------------------------
-    // PERINGKAT 1: Carian Lokal (Skop Sekolah/OU)
-    // ---------------------------------------------------------
-    for (let i = 0; i < excelData.length; i++) {
-        const row = excelData[i];
-        
-        // Pengecam lajur dinamik untuk lajur NAMA
-        const rawName = findValueByKeys(row, ['NAMA', 'NAMA MURID', 'NAME', 'NAMA PENUH']);
-
-        if (i % 50 === 0 && typeof progressCallback === 'function') {
-            progressCallback(i, excelData.length, "Memproses Peringkat 1 (Carian Sekolah)...");
-            await new Promise(resolve => setTimeout(resolve, 0));
-        }
-
-        const searchName = normalizeName(rawName);
-        let match = null;
-
-        if (searchName) {
-            match = localNameMap.get(searchName);
-        }
-
-        if (match) {
-            // Kemaskini baris Excel dengan data dari Supabase
-            row['EMEL'] = match.emel || '';
-            row['NAMA SEKOLAH'] = match.nama_sekolah || '';
-            row['KOD OU'] = extractOU(match.ou);
-            row['STATUS PADANAN'] = 'BERJAYA (SKOP SEKOLAH)';
-            stats.successTier1++;
-        } else {
-            // Simpan untuk carian global peringkat 2
-            unmatchedRecords.push({ row, searchName });
-            if (searchName && !unmatchedNames.includes(searchName)) {
-                unmatchedNames.push(searchName);
-            }
-        }
-    }
-
-    console.log("✅ Peringkat 1 Selesai. Gagal Padan Lokal:", unmatchedRecords.length);
-
-    // ---------------------------------------------------------
-    // PERINGKAT 2: Carian Global (Jika Peringkat 1 Gagal)
-    // ---------------------------------------------------------
-    if (unmatchedNames.length > 0) {
-        console.log("🌐 Memulakan Carian Global untuk:", unmatchedNames.length, "nama unik.");
-        
+    // 3. TIER 2: Padanan Carian Global (Supabase Search)
+    if (unmatchedRecords.length > 0) {
         try {
-            const globalResults = await fetchGlobalCallback(unmatchedNames);
+            // Ambil senarai nama sahaja untuk carian global (Batch Processing)
+            const namesToSearch = unmatchedRecords.map(item => item.searchName).filter(n => n !== '');
             
+            // Panggil API Global Match (Akan dijana dalam api.js nanti)
+            const globalResults = await fetchGlobalMatch(namesToSearch);
+            
+            // Bina Map hasil global
             const globalNameMap = new Map();
             globalResults.forEach(item => {
-                const normName = normalizeName(item.nama_penuh || item.nama);
-                if (normName && !globalNameMap.has(normName)) {
-                    globalNameMap.set(normName, item);
-                }
+                const normName = normalizeName(item.nama_penuh);
+                if (normName) globalNameMap.set(normName, item);
             });
 
-            for (const record of unmatchedRecords) {
-                const { row, searchName } = record;
-                const match = globalNameMap.get(searchName);
+            // Proses rekod yang gagal tadi
+            unmatchedRecords.forEach(({ row, searchName }) => {
+                const globalMatch = globalNameMap.get(searchName);
 
-                if (match) {
-                    row['EMEL'] = match.emel || '';
-                    row['NAMA SEKOLAH'] = match.nama_sekolah || '';
-                    row['KOD OU'] = extractOU(match.ou);
-                    row['STATUS PADANAN'] = 'BERJAYA (CARIAN GLOBAL)';
+                if (globalMatch) {
+                    row['EMEL'] = globalMatch.emel || '';
+                    row['NAMA SEKOLAH'] = globalMatch.nama_sekolah || '';
+                    row['KOD OU'] = extractOU(globalMatch.ou);
+                    row['STATUS PADANAN'] = 'BERJAYA (GLOBAL)';
                     stats.successTier2++;
                 } else {
                     row['EMEL'] = 'TIDAK DIJUMPAI';
@@ -172,22 +129,20 @@ export const runMatchingEngine = async (excelData, localDelimaData, fetchGlobalC
                     row['STATUS PADANAN'] = 'GAGAL (TIADA REKOD)';
                     stats.failed++;
                 }
-            }
+                finalData.push(row);
+            });
+
         } catch (error) {
-            console.error("❌ Ralat Carian Global:", error);
-            unmatchedRecords.forEach(record => {
-                record.row['EMEL'] = 'RALAT API';
-                record.row['STATUS PADANAN'] = 'GAGAL (RALAT SISTEM)';
+            console.error("❌ Ralat Tier 2 (Global):", error);
+            // Jika API global gagal, tandakan baki sebagai ralat
+            unmatchedRecords.forEach(({ row }) => {
+                row['EMEL'] = 'RALAT API';
+                row['STATUS PADANAN'] = 'GAGAL (RALAT SISTEM)';
                 stats.failed++;
+                finalData.push(row);
             });
         }
     }
 
-    console.log("📊 Statistik Akhir:", stats);
-    console.groupEnd();
-
-    return {
-        finalData: excelData, 
-        stats: stats
-    };
+    return { finalData, stats };
 };
