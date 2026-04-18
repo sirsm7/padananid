@@ -11,8 +11,8 @@
 // Sila kemas kini URL dan ANON_KEY ini dengan kelayakan projek Supabase anda.
 // ============================================================================
 const SUPABASE_CONFIG = {
-    URL: 'SILA_MASUKKAN_SUPABASE_PROJECT_URL_ANDA_DI_SINI',
-    ANON_KEY: 'SILA_MASUKKAN_SUPABASE_ANON_KEY_ANDA_DI_SINI'
+    URL: 'https://app.tech4ag.my',
+    ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzYzMzczNjQ1LCJleHAiOjIwNzg3MzM2NDV9.vZOedqJzUn01PjwfaQp7VvRzSm4aRMr21QblPDK8AoY'
 };
 
 // Inisialisasi klien Supabase menggunakan fungsi dari CDN yang dimuatkan di index.html
