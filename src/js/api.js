@@ -3,24 +3,39 @@
  * Folder: /src/js/api.js
  * Fungsi: Menguruskan semua komunikasi (HTTP requests) secara terus dengan Supabase REST API.
  * Arkitek: Pro Web Caster (Pure Client-to-Supabase Architecture)
- * Kemas kini: Penukaran jadual ke delima_salinan_admin & Intersepsi Ralat 404 Spesifik.
+ * Kemas kini: Pelaksanaan Senibina Adapter (Column Mapping) bagi menyelesaikan Ralat HTTP 400.
  */
 
 // ============================================================================
-// KONFIGURASI SUPABASE
-// PERHATIAN: Pembolehubah ini mengawal akses ke pangkalan data.
+// KONFIGURASI SUPABASE & PEMETAAN LAJUR
 // ============================================================================
 const SUPABASE_CONFIG = {
     URL: "https://app.tech4ag.my",
     ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzYzMzczNjQ1LCJleHAiOjIwNzg3MzM2NDV9.vZOedqJzUn01PjwfaQp7VvRzSm4aRMr21QblPDK8AoY",
     
-    // Nama jadual utama yang menyimpan data DELIMa (Dikemas kini)
+    // Nama jadual utama yang menyimpan data DELIMa
     TABLE_DELIMA: "delima_salinan_admin",
     
     // Nama jadual gabungan untuk senarai unik sekolah
     TABLE_SMPID: "smpid_sekolah_data",
     TABLE_DELIMA_SEKOLAH: "delima_data_sekolah",
     TIMEOUT_MS: 30000 
+};
+
+/**
+ * ADAPTER CORAK STRUKTUR (Structural Pattern Adapter)
+ * Menukar JSON yang ditarik dari pangkalan data kepada format standard 
+ * yang difahami oleh enjin matcher.js tanpa merosakkan prinsip SoC.
+ * @param {Object} dbItem - Objek baris dari Supabase
+ * @returns {Object} - Objek yang telah dipetakan
+ */
+const mapToMatcherFormat = (dbItem) => {
+    return {
+        nama: dbItem.nama_penuh || '',      // Pangkalan data = nama_penuh -> Enjin = nama
+        sekolah: dbItem.nama_sekolah || '', // Pangkalan data = nama_sekolah -> Enjin = sekolah
+        emel: dbItem.emel || '',            // Kekal sama
+        ou: dbItem.ou || ''                 // Kekal sama
+    };
 };
 
 /**
@@ -65,11 +80,9 @@ const fetchSupabase = async (endpoint, options = {}) => {
  */
 export const fetchSchoolsList = async () => {
     try {
-        // Rujukan endpoint untuk kedua-dua jadual
         const endpointSmpid = `/rest/v1/${SUPABASE_CONFIG.TABLE_SMPID}?select=kod_sekolah,nama_sekolah`;
         const endpointDelimaSekolah = `/rest/v1/${SUPABASE_CONFIG.TABLE_DELIMA_SEKOLAH}?select=kod_sekolah,kod_ou`;
         
-        // Laksanakan kedua-dua panggilan serentak
         const [resSmpid, resDelimaSekolah] = await Promise.all([
             fetchSupabase(endpointSmpid, { method: 'GET' }),
             fetchSupabase(endpointDelimaSekolah, { method: 'GET' })
@@ -82,7 +95,6 @@ export const fetchSchoolsList = async () => {
         const dataSmpid = await resSmpid.json();
         const dataDelimaSekolah = await resDelimaSekolah.json();
 
-        // Bina Map (Kamus) dari SMPID untuk carian nama O(1)
         const smpidNameMap = {};
         if (Array.isArray(dataSmpid)) {
             dataSmpid.forEach(school => {
@@ -92,7 +104,6 @@ export const fetchSchoolsList = async () => {
             });
         }
 
-        // Cantumkan data DELIMA dengan Nama dari Map SMPID
         const combinedList = [];
         if (Array.isArray(dataDelimaSekolah)) {
             dataDelimaSekolah.forEach(item => {
@@ -106,12 +117,11 @@ export const fetchSchoolsList = async () => {
             });
         }
 
-        // Susun mengikut abjad (A-Z) pada bahagian client-side sebelum dihantar ke UI
         return combinedList.sort((a, b) => a.nama_sekolah.localeCompare(b.nama_sekolah));
 
     } catch (error) {
         console.error("Gagal menarik dan menggabungkan senarai sekolah dari Supabase:", error);
-        return mockSchoolsData(); // Fallback untuk UI Testing
+        return mockSchoolsData(); 
     }
 };
 
@@ -119,31 +129,34 @@ export const fetchSchoolsList = async () => {
  * Panggil semua data emel DELIMa khusus untuk SATU sekolah (Berdasarkan Kod OU).
  * Digunakan untuk Padanan Peringkat 1 (Local Matching).
  * @param {string} kodOu - Kod organisasi unit sekolah (contoh: "8001")
- * @returns {Promise<Array>} - Tatasusunan data pelajar [{nama: "ALI", emel: "m-123@moe-dl.edu.my", ou: "8001"}, ...]
+ * @returns {Promise<Array>} - Tatasusunan data pelajar format standard
  */
 export const fetchSchoolData = async (kodOu) => {
     if (!kodOu) throw new Error("Kod OU diperlukan untuk carian peringkat 1.");
 
     try {
-        // Rujukan endpoint: Filter dimana ou == kodOu
-        const endpoint = `/rest/v1/${SUPABASE_CONFIG.TABLE_DELIMA}?ou=eq.${encodeURIComponent(kodOu)}&select=nama,emel,ou,sekolah`;
+        // Menggunakan nama lajur pangkalan data sebenar: nama_penuh, nama_sekolah
+        const endpoint = `/rest/v1/${SUPABASE_CONFIG.TABLE_DELIMA}?ou=eq.${encodeURIComponent(kodOu)}&select=nama_penuh,emel,ou,nama_sekolah`;
         
         const response = await fetchSupabase(endpoint, { method: 'GET' });
 
         if (!response.ok) {
-            // Pintasan Ralat 404 (Jadual Tidak Wujud)
             if (response.status === 404) {
                 throw new Error(`Ralat 404: Jadual '${SUPABASE_CONFIG.TABLE_DELIMA}' tidak wujud di dalam Supabase.`);
+            } else if (response.status === 400) {
+                throw new Error(`Ralat 400: Ralat sintaks atau nama lajur tidak wujud di dalam jadual.`);
             }
             throw new Error(`Ralat HTTP Supabase (School Data): ${response.status}`);
         }
 
         const data = await response.json();
-        return Array.isArray(data) ? data : [];
+        
+        // Kembalikan data yang telah dipetakan (Mapped Array)
+        return Array.isArray(data) ? data.map(mapToMatcherFormat) : [];
 
     } catch (error) {
         console.error(`Gagal menarik data untuk OU ${kodOu}:`, error);
-        return mockSchoolStudentsData(kodOu); // Fallback untuk UI Testing
+        return mockSchoolStudentsData(kodOu); 
     }
 };
 
@@ -151,7 +164,7 @@ export const fetchSchoolData = async (kodOu) => {
  * Panggil enjin pangkalan data Supabase untuk memadankan senarai nama yang gagal dijumpai di Peringkat 1.
  * Menggunakan kaedah 'Chunking' untuk mengelakkan URL terlampau panjang (URL Length Limit).
  * @param {Array<string>} unmatchedNames - Tatasusunan nama ["AHMAD BIN ABU", "SITI BINTI ALI"]
- * @returns {Promise<Array>} - Tatasusunan hasil padanan global
+ * @returns {Promise<Array>} - Tatasusunan hasil padanan global format standard
  */
 export const fetchGlobalMatch = async (unmatchedNames) => {
     if (!unmatchedNames || !Array.isArray(unmatchedNames) || unmatchedNames.length === 0) {
@@ -159,8 +172,6 @@ export const fetchGlobalMatch = async (unmatchedNames) => {
     }
 
     try {
-        // Pecahkan (chunk) array kepada kumpulan yang lebih kecil (cth: 50 nama per request)
-        // Ini penting untuk mengelakkan ralat 414 URI Too Long dari Supabase REST API
         const chunkSize = 50;
         const chunks = [];
         for (let i = 0; i < unmatchedNames.length; i += chunkSize) {
@@ -169,20 +180,23 @@ export const fetchGlobalMatch = async (unmatchedNames) => {
 
         let allGlobalResults = [];
 
-        // Eksekusi setiap chunk secara selari menggunakan Promise.all
         const fetchPromises = chunks.map(async (nameChunk) => {
-            // Bersihkan nama untuk mengelakkan ralat sintaks pada URL Supabase
-            // Format Supabase: in.("NAMA 1","NAMA 2")
             const formattedNames = nameChunk.map(n => `"${n.replace(/"/g, '')}"`).join(',');
-            const endpoint = `/rest/v1/${SUPABASE_CONFIG.TABLE_DELIMA}?nama=in.(${encodeURIComponent(formattedNames)})&select=nama,emel,ou,sekolah`;
+            
+            // KEMAS KINI KRITIKAL: Carian menggunakan lajur 'nama_penuh'
+            const endpoint = `/rest/v1/${SUPABASE_CONFIG.TABLE_DELIMA}?nama_penuh=in.(${encodeURIComponent(formattedNames)})&select=nama_penuh,emel,ou,nama_sekolah`;
             
             const response = await fetchSupabase(endpoint, { method: 'GET' });
             
             if (response.ok) {
-                return await response.json();
+                const json = await response.json();
+                // Kembalikan data yang telah dipetakan (Mapped Array)
+                return Array.isArray(json) ? json.map(mapToMatcherFormat) : [];
             } else {
                 if (response.status === 404) {
                     console.error(`Ralat 404 Carian Global: Jadual '${SUPABASE_CONFIG.TABLE_DELIMA}' tiada.`);
+                } else if (response.status === 400) {
+                    console.error(`Ralat 400 Carian Global: Ketidakpadanan nama lajur.`);
                 } else {
                     console.warn(`Chunk gagal diproses (HTTP ${response.status})`);
                 }
@@ -190,10 +204,8 @@ export const fetchGlobalMatch = async (unmatchedNames) => {
             }
         });
 
-        // Tunggu semua proses carian chunk selesai
         const resultsArrays = await Promise.all(fetchPromises);
         
-        // Gabungkan semua tatasusunan ke dalam satu tatasusunan (flatten)
         resultsArrays.forEach(arr => {
             if (Array.isArray(arr)) {
                 allGlobalResults = allGlobalResults.concat(arr);
