@@ -7,7 +7,117 @@
  */
 
 // ============================================================================
-// ELEMEN DOM (CACHED VIA GETTERS)
+// ELEMEN DOM (CACHED VIA GETTERS)/**
+ * Module: UI & DOM Controller
+ * Folder: /src/js/ui.js
+ * Function: Handles all visual updates, DOM manipulations, and table rendering.
+ * Architect: Pro Web Caster
+ * Note: Strictly enforces Separation of Concerns (SoC). No business logic here.
+ */
+
+// UI Configuration State
+const UI_STATE = {
+    resultsContainerId: 'resultsContainer',
+    tableBodyId: 'resultsTableBody',
+    statsTotalId: 'statsTotal',
+    statsMatchedId: 'statsMatched',
+    statsUnmatchedCsvId: 'statsUnmatchedCsv',
+    statsUnmatchedDbId: 'statsUnmatchedDb'
+};
+
+/**
+ * Toggles the loading state of the application.
+ * @param {boolean} isLoading - True to show spinner, false to show results.
+ * @param {HTMLElement} uploadArea - The drag-and-drop container.
+ * @param {HTMLElement} loadingSpinner - The loading animation element.
+ * @param {HTMLElement} resultsArea - The container for the results table.
+ */
+export function toggleLoading(isLoading, uploadArea, loadingSpinner, resultsArea) {
+    if (isLoading) {
+        // Hide upload and results, show spinner
+        uploadArea.classList.add('hidden');
+        if(resultsArea) resultsArea.classList.add('hidden');
+        if(loadingSpinner) loadingSpinner.classList.remove('hidden');
+    } else {
+        // Hide spinner, hide upload, show results
+        if(loadingSpinner) loadingSpinner.classList.add('hidden');
+        uploadArea.classList.add('hidden');
+        if(resultsArea) resultsArea.classList.remove('hidden');
+    }
+}
+
+/**
+ * Updates the summary statistics badges above the results table.
+ * @param {Object} matchResults - The result object from matcher.js
+ */
+export function updateStats(matchResults) {
+    const elTotal = document.getElementById(UI_STATE.statsTotalId);
+    const elMatched = document.getElementById(UI_STATE.statsMatchedId);
+    const elUnmatchedCsv = document.getElementById(UI_STATE.statsUnmatchedCsvId);
+    const elUnmatchedDb = document.getElementById(UI_STATE.statsUnmatchedDbId);
+
+    if (!matchResults) return;
+
+    // Calculate total rows processed from CSV
+    const totalCsvRows = matchResults.matches.length + matchResults.unmatchedCsv.length;
+
+    // Update the DOM text content securely
+    if(elTotal) elTotal.textContent = totalCsvRows;
+    if(elMatched) elMatched.textContent = matchResults.matches.length;
+    if(elUnmatchedCsv) elUnmatchedCsv.textContent = matchResults.unmatchedCsv.length;
+    if(elUnmatchedDb) elUnmatchedDb.textContent = matchResults.unmatchedDb.length;
+}
+
+/**
+ * Renders the matched results into an HTML table securely.
+ * @param {Array<Object>} matchedData - Array of matched objects from matcher.js
+ */
+export function renderTable(matchedData) {
+    const tbody = document.getElementById(UI_STATE.tableBodyId);
+    if (!tbody) {
+        console.error('UI Engine Error: Table body element not found in DOM.');
+        return;
+    }
+
+    // Clear existing rows
+    tbody.innerHTML = '';
+
+    if (!matchedData || matchedData.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-gray-500">Tiada padanan data dijumpai.</td></tr>`;
+        return;
+    }
+
+    // Build the table rows dynamically
+    matchedData.forEach((item, index) => {
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white hover:bg-gray-50' : 'bg-gray-50 hover:bg-gray-100';
+
+        // Safe extraction of values with fallbacks to avoid 'undefined' string printing
+        const csvName = item.csvData['NAMA'] || '-';
+        const csvId = item.csvData['ID MURID'] || '-';
+        const dbName = item.dbData.name || '-';
+        const dbEmail = item.dbData.email || '-';
+        const dbOrgUnit = item.dbData.orgUnitPath || '-';
+
+        // Construction using secure innerText (via textContent injection) to prevent XSS
+        const cellsData = [
+            csvName,
+            csvId,
+            dbName,
+            dbEmail,
+            dbOrgUnit
+        ];
+
+        cellsData.forEach(cellText => {
+            const td = document.createElement('td');
+            td.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-700';
+            td.textContent = cellText; // Using textContent defends against XSS if data is malformed
+            row.appendChild(td);
+        });
+
+        tbody.appendChild(row);
+    });
+}
 // ============================================================================
 export const UI = {
     // Langkah 1: Muat Naik Fail

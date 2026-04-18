@@ -1,170 +1,120 @@
 /**
- * Modul: Enjin Padanan Data (Matcher Engine)
+ * Module: Matcher Engine (Core)
  * Folder: /src/js/matcher.js
- * Fungsi: Memproses logik normalisasi teks, regex pengekstrakan, dan memadankan data fail tempatan dengan data Supabase.
- * Arkitek: Pro Web Caster (Strict SoC Enforced)
+ * Function: Processes arrays of CSV data and Database data to find exact and normalized matches.
+ * Architect: Pro Web Caster (Forensic Normalization V2.0)
+ * Note: Strictly enforces Separation of Concerns (SoC).
  */
 
 /**
- * Menormalisasikan nama untuk memastikan padanan yang jitu dan kalis ralat.
- * Membuang jarak berlebihan, mengubah ke huruf besar, dan membuang watak khas jika perlu.
- * @param {string} name - Nama mentah dari pangkalan data atau Excel
- * @returns {string} - Nama yang telah dinormalisasi (cth: "AHMAD BIN ABU")
+ * Normalizes a given name string by removing whitespace, standardizing case, 
+ * and stripping out common Malaysian naming artifacts (BIN, BINTI, A/L, A/P, aliases).
+ * Translated and enhanced from original GAS 'Normalisasi.gs'.
+ * * @param {string} name - The raw name string from CSV or DB.
+ * @returns {string} - The fully normalized, comparable name string.
  */
-export const normalizeName = (name) => {
-    if (!name || typeof name !== 'string') return '';
-    
+export function normalizeName(name) {
+    // Data Integrity Check: Return empty string if data is null, undefined, or not a string
+    if (!name || typeof name !== 'string') {
+        return '';
+    }
+
+    // 1. Convert to uppercase for baseline standardization
     let cleaned = name.toUpperCase();
+
+    // 2. Handle Aliases: If an '@' exists, take the primary name (before the '@')
+    if (cleaned.includes('@')) {
+        cleaned = cleaned.split('@')[0];
+    }
+
+    // 3. Remove system suffixes/prefixes (e.g., from MOE/KPM systems) if any
+    cleaned = cleaned.replace(/-MOE/g, '').replace(/-KPM/g, '');
+
+    // 4. Strip out common patronymic/matronymic terms strictly as distinct words
+    // Using word boundaries (\b) to prevent stripping 'BIN' from 'BINTANG'
+    const artifactsToRemove = ['BIN', 'BINTI', 'BT', 'B', 'A/L', 'A/P', 'AL', 'AP', 'ANAK'];
     
-    // Buang watak khas yang tidak perlu (contoh: koma, titik) yang mungkin mengganggu padanan
-    cleaned = cleaned.replace(/[,.]/g, '');
-    
-    // Buang jarak berlebihan di antara perkataan dan di hujung/awal (trimming)
+    artifactsToRemove.forEach(artifact => {
+        // Create regex for exact word match, handling potential surrounding spaces
+        const regex = new RegExp(`\\b${artifact}\\b`, 'g');
+        cleaned = cleaned.replace(regex, ' ');
+    });
+
+    // 5. Remove all remaining punctuation and special characters, leaving only letters and numbers
+    cleaned = cleaned.replace(/[^\w\s]/g, '');
+
+    // 6. Collapse multiple spaces into a single space and trim trailing/leading spaces
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
-    
+
     return cleaned;
-};
+}
 
 /**
- * Mengekstrak hanya 4 atau 5 digit hujung dari rentetan Kod OU untuk pelaporan.
- * @param {string|number} ouString - Rentetan OU mentah (contoh: "Sekolah 8001" atau 80012)
- * @returns {string} - 4 atau 5 digit terawal yang dijumpai dari hujung (contoh: "8001")
+ * Executes the core matching algorithm between parsed CSV data and fetched DB data.
+ * * @param {Array<Object>} csvData - Array of objects from Papa.parse (Headers must match CSV exactly).
+ * @param {Array<Object>} dbData - Array of objects from Supabase (Schema columns).
+ * @returns {Object} - An object containing arrays of matched data, unmatched CSV data, and unmatched DB data.
  */
-export const extractOU = (ouString) => {
-    if (!ouString) return '';
-    
-    // Regex: Cari 4 ke 5 digit (\d{4,5}) di hujung string ($)
-    const match = String(ouString).match(/\d{4,5}$/);
-    
-    // Jika padanan dijumpai, pulangkan digit tersebut. Jika tidak, pulangkan nilai asal sebagai fallback.
-    return match ? match[0] : String(ouString);
-};
-
-/**
- * Enjin Padanan Dua Peringkat (Two-Tier Matching Engine)
- * Menggunakan algoritma Hashing (Map Object) untuk kecekapan masa carian O(1).
- * * @param {Array<Object>} excelData - Data mentah dari fail Excel pengguna (Array of Objects)
- * @param {Array<Object>} localDelimaData - Data DELIMa untuk sekolah terpilih (Peringkat 1)
- * @param {Function} fetchGlobalCallback - Fungsi asinkroni dari api.js untuk menarik data global
- * @param {Function} progressCallback - Fungsi callback untuk mengemas kini UI Progres Bar
- * @returns {Promise<Object>} - Mengembalikan objek mengandungi { finalData, stats }
- */
-export const runMatchingEngine = async (excelData, localDelimaData, fetchGlobalCallback, progressCallback) => {
-    const stats = {
-        total: excelData.length,
-        successTier1: 0,
-        successTier2: 0,
-        failed: 0
+export function matchData(csvData, dbData) {
+    const results = {
+        matches: [],
+        unmatchedCsv: [],
+        unmatchedDb: [...dbData] // Clone DB array to mutate as we find matches
     };
 
-    const unmatchedRecords = []; // Simpan rujukan pointer kepada rekod excel untuk Peringkat 2
-    const unmatchedNames = [];   // Simpan nama unik sahaja untuk dihantar ke carian global API
+    // Failsafe: Ensure arrays are valid
+    if (!Array.isArray(csvData) || !Array.isArray(dbData)) {
+        console.error('Matcher Engine Error: Invalid data structures passed to matchData().');
+        return results;
+    }
 
-    // ---------------------------------------------------------
-    // PRA-PEMPROSESAN: Bina Hash Map Peringkat 1
-    // ---------------------------------------------------------
-    const localDataMap = new Map();
-    localDelimaData.forEach(item => {
-        const normName = normalizeName(item.nama);
-        if (normName) {
-            localDataMap.set(normName, item);
+    // Iterate through every row in the uploaded CSV
+    csvData.forEach((csvRow, index) => {
+        // Data Handling Failsafe: CSV keys are strictly case-sensitive based on the CSV header.
+        // We target 'NAMA' explicitly.
+        const rawCsvName = csvRow['NAMA'];
+
+        // Skip completely empty rows
+        if (!rawCsvName) {
+            return; 
+        }
+
+        const normalizedCsvName = normalizeName(rawCsvName);
+
+        // Scan the unmatched DB pool for a normalized match
+        const matchIndex = results.unmatchedDb.findIndex(dbRow => {
+            // Data Handling Failsafe: Target 'name' column from Supabase schema
+            const rawDbName = dbRow.name; 
+            
+            if (!rawDbName) {
+                return false;
+            }
+
+            return normalizeName(rawDbName) === normalizedCsvName;
+        });
+
+        // Evaluate match results
+        if (matchIndex !== -1) {
+            // Match successfully found
+            const matchedDbRecord = results.unmatchedDb[matchIndex];
+            
+            // Build the merged entity
+            results.matches.push({
+                csvData: csvRow,
+                dbData: matchedDbRecord,
+                normalizedKey: normalizedCsvName
+            });
+
+            // Remove the matched record from the pool to prevent duplicate mapping
+            results.unmatchedDb.splice(matchIndex, 1);
+        } else {
+            // No match found in the database pool
+            results.unmatchedCsv.push(csvRow);
         }
     });
 
-    // ---------------------------------------------------------
-    // PERINGKAT 1: Carian Skop Tempatan (Local Map Lookup)
-    // ---------------------------------------------------------
-    for (let i = 0; i < excelData.length; i++) {
-        const row = excelData[i];
-        const rawName = row['NAMA']; // Pastikan lajur bernama NAMA wujud
-        
-        // Kemas kini UI Progres setiap 50 rekod (menghalang browser freeze)
-        if (i % 50 === 0 && typeof progressCallback === 'function') {
-            progressCallback(i, excelData.length, "Memproses Padanan Peringkat 1...");
-            // Pelepasan thread eksekusi untuk render UI
-            await new Promise(resolve => setTimeout(resolve, 0));
-        }
+    console.info(`Matcher Engine Report: Processed ${csvData.length} CSV rows against ${dbData.length} DB records.`);
+    console.info(`Results -> Matched: ${results.matches.length} | Unmatched CSV: ${results.unmatchedCsv.length} | Unmatched DB: ${results.unmatchedDb.length}`);
 
-        if (!rawName) {
-            row['EMEL'] = 'TIADA DATA NAMA';
-            row['NAMA SEKOLAH'] = '';
-            row['KOD OU'] = '';
-            row['STATUS PADANAN'] = 'GAGAL (TIADA DATA)';
-            stats.failed++;
-            continue;
-        }
-
-        const searchName = normalizeName(rawName);
-        const match = localDataMap.get(searchName);
-
-        if (match) {
-            // Berjaya Padanan Peringkat 1 - Masukkan medan data baharu ke dalam objek
-            row['EMEL'] = match.emel || '';
-            row['NAMA SEKOLAH'] = match.sekolah || '';
-            row['KOD OU'] = extractOU(match.ou);
-            row['STATUS PADANAN'] = 'BERJAYA (SKOP SEKOLAH)';
-            stats.successTier1++;
-        } else {
-            // Gagal Peringkat 1, asingkan untuk dihantar ke Peringkat 2
-            unmatchedRecords.push(row);
-            if (!unmatchedNames.includes(searchName)) {
-                unmatchedNames.push(searchName);
-            }
-        }
-    }
-
-    // ---------------------------------------------------------
-    // PERINGKAT 2: Carian Global (Fallback Supabase Search)
-    // ---------------------------------------------------------
-    if (unmatchedNames.length > 0) {
-        if (typeof progressCallback === 'function') {
-            progressCallback(
-                excelData.length, 
-                excelData.length, 
-                `Membuat Carian Global untuk ${unmatchedNames.length} nama yang tiada di sekolah ini...`
-            );
-        }
-
-        // Tarik data pukal (bulk) dari Supabase (ini akan memanggil chunks di api.js)
-        const globalResults = await fetchGlobalCallback(unmatchedNames);
-
-        // Pra-pemprosesan: Bina Hash Map Peringkat 2 dari hasil carian global
-        const globalDataMap = new Map();
-        globalResults.forEach(item => {
-            const normName = normalizeName(item.nama);
-            if (normName) {
-                globalDataMap.set(normName, item);
-            }
-        });
-
-        // Semak dan padankan semula rekod yang gagal di Peringkat 1
-        for (let i = 0; i < unmatchedRecords.length; i++) {
-            const row = unmatchedRecords[i];
-            const searchName = normalizeName(row['NAMA']);
-            const match = globalDataMap.get(searchName);
-
-            if (match) {
-                // Berjaya Padanan Peringkat 2 (Pelajar berpindah/bertukar sekolah)
-                row['EMEL'] = match.emel || '';
-                row['NAMA SEKOLAH'] = match.sekolah || '';
-                row['KOD OU'] = extractOU(match.ou);
-                row['STATUS PADANAN'] = 'BERJAYA (CARIAN GLOBAL)';
-                stats.successTier2++;
-            } else {
-                // Gagal Sepenuhnya (Data memang tiada dalam sistem DELIMa Pusat)
-                row['EMEL'] = 'TIDAK DIJUMPAI';
-                row['NAMA SEKOLAH'] = 'TIDAK DIJUMPAI';
-                row['KOD OU'] = '-';
-                row['STATUS PADANAN'] = 'GAGAL (TIADA REKOD)';
-                stats.failed++;
-            }
-        }
-    }
-
-    // Kembalikan objek data asal yang telah diubah suai dan statistik operasi
-    // Struktur data asal seperti TINGKATAN, NAMA KELAS dikekalkan kerana kita memanipulasi rujukan memori (in-place mutation)
-    return {
-        finalData: excelData, 
-        stats: stats
-    };
-};
+    return results;
+}
