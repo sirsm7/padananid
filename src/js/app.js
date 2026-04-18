@@ -2,13 +2,13 @@
  * Modul: Pengawal Utama Sistem (App Controller)
  * Folder: /src/js/app.js
  * Fungsi: Mengkoordinasi Aliran Data Berperingkat (Two-Pass) yang telah dipertingkatkan.
- * Arkitek: Pro Web Caster
+ * Arkitek: Pro Web Caster (Resolusi Pepijat Memori / Wildcard Fix)
  */
 
 import { 
     UI, logMessage, clearLogs, updateDbStatus, showFileInfo, 
     updateProgress, renderTable, updateStats, populateSchoolDropdown,
-    getSelectedSchoolOU // Fungsi helper baharu dari dom.js
+    getSelectedSchoolOU
 } from './ui/dom.js';
 
 import { 
@@ -138,7 +138,6 @@ const handleDataProcessing = async () => {
         return;
     }
 
-    // [KEMAS KINI] Ambil nilai OU dari input tersembunyi
     const selectedOU = getSelectedSchoolOU();
     if (!selectedOU) {
         logMessage('Sila cari dan pilih sekolah dari senarai Dropdown sebelum memulakan padanan.', 'warning');
@@ -150,7 +149,7 @@ const handleDataProcessing = async () => {
         UI.btnProcess.disabled = true;
         UI.btnDownload.disabled = true;
         if (UI.schoolSearchInput) UI.schoolSearchInput.disabled = true;
-        if (UI.btnClearSchool) UI.btnClearSchool.classList.add('hidden'); // Sembunyi butang pangkah
+        if (UI.btnClearSchool) UI.btnClearSchool.classList.add('hidden'); 
         
         logMessage('Memulakan sesi padanan berperingkat...', 'info');
         
@@ -166,14 +165,13 @@ const handleDataProcessing = async () => {
         let finalData = { results: phase1Data.matchedResults, stats: phase1Data.stats };
 
         // TAHAP 2: Carian Global (Fallback) jika ada nama yang gagal
-        // Kita melaksanakan muat turun keseluruhan jadual secara berkelompok (Chunking) 
-        // untuk menangani isu penapis Case-Sensitivity dan Jarak di Supabase.
+        // [RESOLUSI MEMORI] Menghantar parameter unmatchedNames ke fungsi fetchFallbackData
         if (phase1Data.unmatchedNames.length > 0) {
-            updateProgress(60, 'Memuat turun data global (Fallback) secara berperingkat...');
-            logMessage(`Menarik baki pangkalan data untuk disemak secara lokal...`, 'info');
+            updateProgress(60, 'Melaksanakan carian spesifik (Wildcard) untuk rekod yang gagal...');
+            logMessage(`Menghantar ${phase1Data.unmatchedNames.length} nama untuk carian Fallback global...`, 'info');
             
-            const fallbackData = await fetchFallbackData();
-            logMessage(`Berjaya menarik ${fallbackData.length} rekod rujukan global.`, 'success');
+            const fallbackData = await fetchFallbackData(phase1Data.unmatchedNames);
+            logMessage(`Berjaya menjumpai ${fallbackData.length} kemungkinan padanan dari carian global.`, 'success');
             
             updateProgress(80, 'Melaksanakan Padanan Peringkat 2...');
             finalData = executePhase2(phase1Data.unmatchedRows, fallbackData, phase1Data.matchedResults, phase1Data.stats);
@@ -198,7 +196,7 @@ const handleDataProcessing = async () => {
         UI.btnProcess.disabled = false;
         if (UI.schoolSearchInput) UI.schoolSearchInput.disabled = false;
         if (UI.selectedSchoolOU && UI.selectedSchoolOU.value && UI.btnClearSchool) {
-             UI.btnClearSchool.classList.remove('hidden'); // Tunjuk semula jika ada pilihan
+             UI.btnClearSchool.classList.remove('hidden'); 
         }
     }
 };

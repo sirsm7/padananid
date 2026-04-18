@@ -1,10 +1,13 @@
 /**
  * Modul: Integrasi Supabase (Service)
  * Folder: /src/js/services/supabase.js
- * Fungsi: Menguruskan hubungan, pengesahan, dan penarikan data.
- * Arkitek: Pro Web Caster (Strategi Chunking/Pagination)
+ * Fungsi: Menguruskan hubungan, pengesahan, dan penarikan data spesifik.
+ * Arkitek: Pro Web Caster (Strategi Wildcard / Memory Fix)
  */
 
+// ============================================================================
+// KELAYAKAN SUPABASE SEBENAR (TELAH DISEMAK)
+// ============================================================================
 const SUPABASE_CONFIG = {
     URL: 'https://app.tech4ag.my',
     ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzYzMzczNjQ1LCJleHAiOjIwNzg3MzM2NDV9.vZOedqJzUn01PjwfaQp7VvRzSm4aRMr21QblPDK8AoY'
@@ -62,38 +65,43 @@ export const fetchDelimaDataByOU = async (kodOU) => {
 };
 
 /**
- * [KEMAS KINI] Menarik SEMUA baki data secara berperingkat (Chunking) untuk Fallback.
- * Ini memastikan tiada rekod tertinggal disebabkan isu 'case-sensitivity' atau 'spacing' di pangkalan data.
- * @returns {Promise<Array>} - Seluruh jadual rekod pelajar.
+ * [RESOLUSI PEPIJAT] Strategi Wildcard OR.
+ * Mengelakkan pemuatan >200k rekod yang meranapkan memori.
+ * Hanya mencari nama yang wujud dalam unmatchedNames menggunakan .or() dan ilike.
+ * @param {Array<string>} unmatchedNames - Array nama (e.g. ['ALI BIN ABU', 'SITI'])
+ * @returns {Promise<Array>} - Hanya rekod yang dipadankan.
  */
-export const fetchFallbackData = async () => {
+export const fetchFallbackData = async (unmatchedNames) => {
     try {
-        let allFallbackData = [];
-        let limit = 1000; // Had maksimum Supabase per request
-        let offset = 0;
-        let hasMore = true;
+        if (!unmatchedNames || unmatchedNames.length === 0) return [];
 
-        while (hasMore) {
+        let allFallbackData = [];
+        // Kita hantar 25 nama serentak dalam satu query bagi mengelakkan URL terlampau panjang
+        const chunkSize = 25; 
+
+        for (let i = 0; i < unmatchedNames.length; i += chunkSize) {
+            const chunk = unmatchedNames.slice(i, i + chunkSize);
+            
+            // Bina string OR berdasarkan nama yang telah dibersihkan ruang kosongnya
+            // Contoh: "ALI BIN ABU" menjadi "nama_penuh.ilike.%ALI%BIN%ABU%"
+            const orQueryString = chunk.map(name => {
+                // Gantikan spasi tunggal/berganda dengan '%'
+                const wildcardName = name.replace(/\s+/g, '%');
+                return `nama_penuh.ilike.%${wildcardName}%`;
+            }).join(',');
+
             const { data, error } = await supabaseClient
                 .from('delima_salinan_admin')
                 .select('id, kod_sekolah, nama_sekolah, nama_penuh, emel, ou, kategori, status')
-                .range(offset, offset + limit - 1);
+                .or(orQueryString); // Hantar carian serentak
 
             if (error) {
-                console.warn("Amaran Fallback Fetch (Chunk):", error.message);
-                break; // Keluar dari loop jika ralat, tapi kekalkan data yang berjaya ditarik
+                console.warn("Amaran Fallback Fetch (Wildcard OR):", error.message);
+                continue; 
             }
 
             if (data && data.length > 0) {
                 allFallbackData = allFallbackData.concat(data);
-                offset += limit;
-                
-                // Jika data yang diterima kurang daripada limit, bermakna kita dah sampai hujung jadual
-                if (data.length < limit) {
-                    hasMore = false;
-                }
-            } else {
-                hasMore = false;
             }
         }
 
