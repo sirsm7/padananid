@@ -2,7 +2,7 @@
  * Modul: Pengawal Utama Sistem (App Controller)
  * Folder: /src/js/app.js
  * Fungsi: Mengkoordinasi Aliran Data Berperingkat (Two-Pass) yang telah dipertingkatkan.
- * Arkitek: Pro Web Caster (Resolusi Pepijat Memori / Susunan Data / Eksport Dinamik)
+ * Arkitek: Pro Web Caster (Resolusi Pepijat Memori / Susunan Data / Eksport Dinamik V2)
  */
 
 import { 
@@ -209,7 +209,7 @@ const handleDataProcessing = async () => {
 };
 
 // ============================================================================
-// LOGIK MUAT TURUN HASIL PADANAN (EXPORT)
+// LOGIK MUAT TURUN HASIL PADANAN (EXPORT DENGAN NAMA FAIL DINAMIK)
 // ============================================================================
 const handleDownloadResults = () => {
     if (!finalMatchResults || finalMatchResults.length === 0) return;
@@ -234,14 +234,31 @@ const handleDownloadResults = () => {
     const blob = new Blob(["\ufeff", csvString], { type: 'text/csv;charset=utf-8;' }); 
     const url = URL.createObjectURL(blob);
     
+    // [MODIFIKASI] Penjanaan Nama Fail Dinamik (SEKOLAH + TIMESTAMP)
+    let rawSchoolName = UI.schoolSearchInput ? UI.schoolSearchInput.value : '';
+    if (!rawSchoolName.trim()) rawSchoolName = 'SEKOLAH';
+    
+    // Tapis nama sekolah dari sebarang karakter yang tidak sah untuk nama fail Windows/Mac
+    const safeSchoolName = rawSchoolName.replace(/[\\/:*?"<>|]/g, '').trim();
+
+    // Format masa: YYYYMMDD HHmm
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    
+    const formattedTimestamp = `${yyyy}${mm}${dd} ${hh}${min}`;
+    const dynamicFileName = `${safeSchoolName} ${formattedTimestamp}.csv`;
+
     const downloadLink = document.createElement("a");
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     downloadLink.href = url;
-    downloadLink.download = `Hasil_Padanan_DELIMa_${timestamp}.csv`;
+    downloadLink.download = dynamicFileName;
     
     document.body.appendChild(downloadLink);
     downloadLink.click();
     document.body.removeChild(downloadLink);
 
-    logMessage('Fail CSV berjaya dimuat turun.', 'success');
+    logMessage(`Fail "${dynamicFileName}" berjaya dimuat turun.`, 'success');
 };
