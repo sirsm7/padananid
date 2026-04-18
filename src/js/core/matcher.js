@@ -2,7 +2,7 @@
  * Modul: Enjin Padanan Utama (Core)
  * Folder: /src/js/core/matcher.js
  * Fungsi: Logik Two-Pass Matching untuk membandingkan CSV dengan data Supabase.
- * Arkitek: Pro Web Caster (Carian Berperingkat)
+ * Arkitek: Pro Web Caster (Carian Berperingkat & Ekstraksi Dinamik)
  */
 
 import { normalizeName, formatOU } from '../utils/normalizer.js';
@@ -18,9 +18,10 @@ const buildLookupDictionary = (supabaseData) => {
     return dictionary;
 };
 
-const findNameColumnIndex = (headers) => {
+// Fungsi utiliti am untuk mencari indeks lajur berdasarkan nama pengepala (header)
+const findColumnIndex = (headers, columnName) => {
     return headers.findIndex(header => 
-        header && header.toString().trim().toUpperCase() === 'NAMA'
+        header && header.toString().trim().toUpperCase() === columnName.toUpperCase()
     );
 };
 
@@ -35,9 +36,11 @@ export const executePhase1 = (csvData, primaryData) => {
     if (!csvData || csvData.length < 2) throw new Error("Data mentah tidak sah.");
     
     const headers = csvData[0];
-    const nameColIndex = findNameColumnIndex(headers);
+    const nameColIndex = findColumnIndex(headers, 'NAMA');
+    const yearColIndex = findColumnIndex(headers, 'TAHUN / TINGKATAN');
+    const classColIndex = findColumnIndex(headers, 'NAMA KELAS');
 
-    if (nameColIndex === -1) throw new Error("Lajur 'NAMA' tidak dijumpai.");
+    if (nameColIndex === -1) throw new Error("Lajur 'NAMA' tidak dijumpai dalam fail yang dimuat naik.");
 
     const lookupMap = buildLookupDictionary(primaryData);
     
@@ -53,6 +56,9 @@ export const executePhase1 = (csvData, primaryData) => {
 
         stats.total++;
         const rawName = row[nameColIndex];
+        const rawYear = yearColIndex !== -1 && row[yearColIndex] ? row[yearColIndex] : '-';
+        const rawClass = classColIndex !== -1 && row[classColIndex] ? row[classColIndex] : '-';
+        
         const searchName = normalizeName(rawName);
         const matchedRecord = lookupMap.get(searchName);
 
@@ -60,6 +66,8 @@ export const executePhase1 = (csvData, primaryData) => {
             stats.successPhase1++;
             matchedResults.push({
                 originalName: rawName,
+                tahunTingkatan: rawYear,
+                namaKelas: rawClass,
                 dbName: matchedRecord.nama_penuh,
                 email: matchedRecord.emel,
                 ou: formatOU(matchedRecord.ou), // Menggunakan penapis Regex OU
@@ -73,7 +81,7 @@ export const executePhase1 = (csvData, primaryData) => {
             // Simpan ke dalam array khas untuk carian Fallback kelak
             // Menapis 'searchName' yang mungkin kosong akibat normalisasi tak sah
             if (searchName) unmatchedNames.push(searchName);
-            unmatchedRows.push({ rawName, searchName, originalRow: row });
+            unmatchedRows.push({ rawName, rawYear, rawClass, searchName, originalRow: row });
         }
     }
 
@@ -101,6 +109,8 @@ export const executePhase2 = (unmatchedRows, fallbackData, currentResults, curre
             stats.successPhase2++;
             finalResults.push({
                 originalName: item.rawName,
+                tahunTingkatan: item.rawYear,
+                namaKelas: item.rawClass,
                 dbName: matchedRecord.nama_penuh,
                 email: matchedRecord.emel,
                 ou: formatOU(matchedRecord.ou),
@@ -113,12 +123,14 @@ export const executePhase2 = (unmatchedRows, fallbackData, currentResults, curre
             stats.failedTotal++;
             finalResults.push({
                 originalName: item.rawName,
+                tahunTingkatan: item.rawYear,
+                namaKelas: item.rawClass,
                 dbName: 'TIDAK JUMPA',
                 email: '-',
                 ou: '-',
                 namaSekolah: '-',
                 kategori: '-',
-                status: 'TIADA DALAM SISTEM',
+                status: 'TIADA, Sila buat carian di delima.tech4ag.my untuk pengesahan',
                 statusFlag: false
             });
         }

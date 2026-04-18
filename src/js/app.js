@@ -2,7 +2,7 @@
  * Modul: Pengawal Utama Sistem (App Controller)
  * Folder: /src/js/app.js
  * Fungsi: Mengkoordinasi Aliran Data Berperingkat (Two-Pass) yang telah dipertingkatkan.
- * Arkitek: Pro Web Caster (Resolusi Pepijat Memori / Wildcard Fix)
+ * Arkitek: Pro Web Caster (Resolusi Pepijat Memori / Susunan Data / Eksport Dinamik)
  */
 
 import { 
@@ -177,6 +177,13 @@ const handleDataProcessing = async () => {
             finalData = executePhase2(phase1Data.unmatchedRows, fallbackData, phase1Data.matchedResults, phase1Data.stats);
         }
 
+        // [MODIFIKASI] Algoritma Susunan (Sorting)
+        // Susun hasil supaya yang berjaya (true) berada di atas dan gagal (false) diletakkan di bawah.
+        finalData.results.sort((a, b) => {
+            if (a.statusFlag === b.statusFlag) return 0;
+            return a.statusFlag ? -1 : 1;
+        });
+
         finalMatchResults = finalData.results;
 
         // KEMAS KINI UI
@@ -209,9 +216,12 @@ const handleDownloadResults = () => {
 
     logMessage('Menjana fail CSV hasil padanan...', 'info');
 
+    // [MODIFIKASI] Pertukaran Pengepala "Nama MOEIS (Asal)" & penambahan lajur dinamik
     const exportFormat = finalMatchResults.map((row, index) => ({
         'Bil': index + 1,
-        'Nama APDM (Asal)': row.originalName,
+        'Nama MOEIS (Asal)': row.originalName,
+        'Tahun / Tingkatan': row.tahunTingkatan || '-',
+        'Nama Kelas': row.namaKelas || '-',
         'Nama DELIMa': row.dbName,
         'Emel DELIMa': row.email,
         'Kod OU (ID Sekolah)': row.ou,
