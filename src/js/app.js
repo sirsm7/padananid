@@ -1,168 +1,255 @@
 /**
- * Module: Main Application Flow (Orchestrator)
+ * Modul: Pengawal Aplikasi Utama (Main Controller) V2
  * Folder: /src/js/app.js
- * Function: Handles DOM events, coordinates data between UI, API, FileHandler, and Matcher modules.
- * Architect: Pro Web Caster
- * Note: Adheres strictly to Separation of Concerns (SoC).
+ * Fungsi: Mengurus kitaran hayat aplikasi, state (keadaan) data, dan event listeners DOM.
+ * Arkitek: Pro Web Caster (Aliran V2: Muat Naik -> Pilih Sekolah -> Padan)
+ * Kemas kini: Penyatuan elemen native <datalist> (Seni Bina SoC).
  */
 
-import { handleFileUpload } from './fileHandler.js';
-import { fetchOrgUnits } from './api.js';
-import { matchData } from './matcher.js';
-import { renderTable, toggleLoading, updateStats } from './ui.js';
+// ============================================================================
+// IMPORT MODUL (ES6 Modules)
+// ============================================================================
+import { fetchSchoolsList, fetchSchoolData, fetchGlobalMatch } from './api.js';
+import { 
+    UI, 
+    populateSchoolDataList, // Diimport baharu dari ui.js 
+    showSelectedSchool, 
+    highlightDropzone, 
+    unhighlightDropzone, 
+    showFileInfo, 
+    showProgress, 
+    updateProgress, 
+    hideProgress, 
+    showResults,
+    resetFullSystemUI,
+    resetFileUploadUI
+} from './ui.js';
+import { runMatchingEngine } from './matcher.js';
+import { readExcelFile, exportToCSV } from './fileHandler.js';
 
-// DOM Elements Initialization
-const uploadArea = document.getElementById('uploadArea');
-const fileInput = document.getElementById('fileInput');
-const loadingSpinner = document.getElementById('loadingSpinner');
-const resultsArea = document.getElementById('resultsArea');
-const btnExport = document.getElementById('btnExport');
+// ============================================================================
+// KEADAAN SISTEM (APPLICATION STATE)
+// ============================================================================
+const AppState = {
+    allSchools: [],          // Menyimpan senarai sekolah dari API
+    selectedSchool: null,    // Menyimpan objek sekolah terpilih
+    uploadedExcelData: [],   // Menyimpan data JSON fail Excel/CSV muat naik (Langkah 1)
+    originalFileName: '',    // Menyimpan nama fail muat naik untuk nama eksport
+    finalMatchedData: null   // Menyimpan hasil akhir padanan
+};
 
-// State Management (Variables to hold the data in memory)
-let parsedCsvData = [];
-let fetchedDbData = [];
-let finalMatchedResults = null;
+// ============================================================================
+// FUNGSI INIT (BOOTSTRAPPING)
+// ============================================================================
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log("Pro Web Caster: Memulakan sistem Hibrid V2...");
+    
+    // Bind semua event listener
+    setupEventListeners();
 
-/**
- * Initializes Event Listeners for the application.
- * Called immediately upon script execution.
- */
-function init() {
-    console.info('App Orchestrator: System Initialized.');
+    // Dapatkan senarai sekolah semasa aplikasi dibuka (di belakang tabir)
+    try {
+        UI.schoolSearchInput.placeholder = "Memuat turun senarai sekolah...";
+        UI.schoolSearchInput.disabled = true;
+        
+        AppState.allSchools = await fetchSchoolsList();
+        
+        // Isikan terus ke dalam <datalist> secara pukal (Native DOM)
+        populateSchoolDataList(AppState.allSchools);
+        
+        UI.schoolSearchInput.placeholder = "Taip nama sekolah atau kod sekolah...";
+        UI.schoolSearchInput.disabled = false;
+        console.log(`Berjaya memuatkan ${AppState.allSchools.length} sekolah ke dalam Datalist.`);
+    } catch (error) {
+        console.error("Gagal memulakan senarai sekolah:", error);
+        UI.schoolSearchInput.placeholder = "Gagal memuat turun data sekolah.";
+    }
+});
 
-    // 1. Drag and Drop Events
-    uploadArea.addEventListener('dragover', (e) => {
+// ============================================================================
+// PENGIKATAN PERISTIWA (EVENT LISTENERS)
+// ============================================================================
+function setupEventListeners() {
+    
+    // --- LANGKAH 1: DRAG & DROP FAIL ---
+    UI.dropzone.addEventListener('dragover', (e) => {
         e.preventDefault();
-        uploadArea.classList.add('border-blue-500', 'bg-blue-50');
+        highlightDropzone();
     });
 
-    uploadArea.addEventListener('dragleave', (e) => {
+    UI.dropzone.addEventListener('dragleave', (e) => {
         e.preventDefault();
-        uploadArea.classList.remove('border-blue-500', 'bg-blue-50');
+        unhighlightDropzone();
     });
 
-    uploadArea.addEventListener('drop', (e) => {
+    UI.dropzone.addEventListener('drop', (e) => {
         e.preventDefault();
-        uploadArea.classList.remove('border-blue-500', 'bg-blue-50');
-        const file = e.dataTransfer.files[0];
-        if (file) {
-            processFile(file);
+        unhighlightDropzone();
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleFileUpload(e.dataTransfer.files[0]);
         }
     });
 
-    // 2. Click to Upload Event
-    fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            processFile(file);
+    // --- LANGKAH 1: KLIK MUAT NAIK FAIL ---
+    UI.fileInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            handleFileUpload(e.target.files[0]);
         }
     });
 
-    // 3. Export Button Event
-    btnExport.addEventListener('click', () => {
-        if (finalMatchedResults && finalMatchedResults.matches.length > 0) {
-            exportToCSV(finalMatchedResults.matches);
-        } else {
-            alert('Tiada data padanan untuk dieksport.');
+    // --- LANGKAH 1: BATAL MUAT NAIK ---
+    UI.cancelUploadBtn.addEventListener('click', () => {
+        AppState.uploadedExcelData = [];
+        AppState.originalFileName = '';
+        resetFileUploadUI();
+    });
+
+    // --- LANGKAH 2: PILIHAN SEKOLAH DARI DATALIST ---
+    // Menggunakan 'change' untuk menangkap pilihan dari Datalist secara natif
+    UI.schoolSearchInput.addEventListener('change', handleSchoolSelection);
+
+    // --- LANGKAH 2: MULA PADANAN (Cetus API -> Matcher) ---
+    UI.startMatchBtn.addEventListener('click', handleStartMatchingProcess);
+
+    // --- LANGKAH 3: MUAT TURUN HASIL ---
+    UI.downloadResultBtn.addEventListener('click', () => {
+        if (AppState.finalMatchedData) {
+            exportToCSV(AppState.finalMatchedData, AppState.originalFileName);
         }
+    });
+
+    // --- LANGKAH 3: RESET SISTEM ---
+    UI.resetSystemBtn.addEventListener('click', () => {
+        AppState.uploadedExcelData = [];
+        AppState.originalFileName = '';
+        AppState.selectedSchool = null;
+        AppState.finalMatchedData = null;
+        resetFullSystemUI();
     });
 }
 
+// ============================================================================
+// PENGENDALI LOGIK (LOGIC HANDLERS)
+// ============================================================================
+
 /**
- * Main execution pipeline. Triggers when a file is dropped or selected.
- * Coordinates File Reading -> API Fetching -> Matching -> UI Rendering.
- * * @param {File} file - The CSV file object from the user's input.
+ * PENGENDALI LANGKAH 1: Pembacaan fail tempatan ke memori pelayar
  */
-async function processFile(file) {
+async function handleFileUpload(file) {
     try {
-        console.group('--- Pipeline Execution Started ---');
+        showProgress("Membaca Fail", "Menukar format Excel/CSV kepada data sistem...");
         
-        // Step 1: UI Update - Show Loading State
-        toggleLoading(true, uploadArea, loadingSpinner, resultsArea);
-
-        // Step 2: Parse the CSV File
-        console.log(`Step 2: Parsing CSV file: ${file.name}`);
-        parsedCsvData = await handleFileUpload(file);
+        // Guna File Handler untuk parse Excel
+        const data = await readExcelFile(file);
         
-        // Debugging: Log the first row of CSV to verify Header mapping (e.g., 'NAMA')
-        console.log(`CSV Parsing Complete. Rows detected: ${parsedCsvData.length}`);
-        if(parsedCsvData.length > 0) {
-            console.dir('CSV First Row Sample:', parsedCsvData[0]);
-            if(parsedCsvData[0]['NAMA'] === undefined) {
-                 console.warn("WARNING: CSV Column 'NAMA' is missing. Matcher will fail. Please check CSV headers.");
-            }
-        }
-
-        // Step 3: Fetch Data from Supabase
-        console.log('Step 3: Fetching Data from Supabase API...');
-        fetchedDbData = await fetchOrgUnits();
+        AppState.uploadedExcelData = data;
+        AppState.originalFileName = file.name;
         
-        // Debugging: Log the first row of DB to verify schema mapping (e.g., 'name')
-        console.log(`DB Fetch Complete. Records received: ${fetchedDbData.length}`);
-        if(fetchedDbData.length > 0) {
-             console.dir('DB First Row Sample:', fetchedDbData[0]);
-             if(fetchedDbData[0].name === undefined) {
-                 console.warn("WARNING: DB Column 'name' is missing. Matcher will fail. Please check API payload.");
-             }
-        }
-
-        // Step 4: Execute Matching Engine
-        console.log('Step 4: Executing Core Matcher Engine...');
-        finalMatchedResults = matchData(parsedCsvData, fetchedDbData);
-        console.log('Matching Complete.', finalMatchedResults);
-
-        // Step 5: Render Results to UI
-        console.log('Step 5: Pushing results to UI Engine...');
-        updateStats(finalMatchedResults);
-        renderTable(finalMatchedResults.matches);
-
-        // Step 6: UI Update - Show Results State
-        toggleLoading(false, uploadArea, loadingSpinner, resultsArea);
+        hideProgress();
+        showFileInfo(file.name, data.length); // Ini akan unlock Langkah 2 dalam ui.js
         
-        console.groupEnd();
-
     } catch (error) {
-        console.error('Pipeline Execution Failed:', error);
-        alert(`Ralat semasa memproses data: ${error.message}`);
-        toggleLoading(false, uploadArea, loadingSpinner, resultsArea);
-        console.groupEnd();
+        hideProgress();
+        alert(error.message);
+        resetFileUploadUI();
     }
 }
 
 /**
- * Utility function to export matched data back to a CSV format.
- * Currently builds a basic CSV string and triggers a browser download.
- * * @param {Array<Object>} matchedData - Array of matched objects containing both CSV and DB data.
+ * Pengendali apabila pengguna memilih atau menaip nama sekolah di Datalist Input
  */
-function exportToCSV(matchedData) {
-    if (!matchedData || matchedData.length === 0) return;
+function handleSchoolSelection(e) {
+    const selectedValue = e.target.value.trim();
 
-    // Define the headers for the export file
-    const headers = ['NAMA (CSV)', 'ID MURID (CSV)', 'NAMA (DB)', 'EMAIL (DB)', 'ORG_UNIT_PATH (DB)'];
-    let csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n";
+    // Jika pengguna memadam teks
+    if (!selectedValue) {
+        AppState.selectedSchool = null;
+        if(UI.startMatchBtn) {
+            UI.startMatchBtn.disabled = true;
+            UI.startMatchBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+        if(UI.selectedSchoolInfo) UI.selectedSchoolInfo.classList.add('hidden');
+        return;
+    }
 
-    // Map the merged data to the export columns
-    matchedData.forEach(item => {
-        // Safe access in case fields are missing or have commas
-        const csvName = `"${(item.csvData['NAMA'] || '').replace(/"/g, '""')}"`;
-        const csvId = `"${(item.csvData['ID MURID'] || '').replace(/"/g, '""')}"`;
-        const dbName = `"${(item.dbData.name || '').replace(/"/g, '""')}"`;
-        const dbEmail = `"${(item.dbData.email || '').replace(/"/g, '""')}"`;
-        const dbOrgUnit = `"${(item.dbData.orgUnitPath || '').replace(/"/g, '""')}"`;
+    const options = UI.schoolDataList.options;
+    let matchedOption = null;
 
-        const row = [csvName, csvId, dbName, dbEmail, dbOrgUnit];
-        csvContent += row.join(",") + "\n";
-    });
+    // Padankan input teks dengan nilai di dalam <option> Datalist
+    for (let i = 0; i < options.length; i++) {
+        if (options[i].value === selectedValue) {
+            matchedOption = options[i];
+            break;
+        }
+    }
 
-    // Create a hidden link and trigger the download
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "Padanan_Berjaya.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (matchedOption) {
+        // Ekstrak data sebenar dari atribut tersembunyi (data-nama, data-ou)
+        const schoolName = matchedOption.getAttribute('data-nama');
+        const schoolOu = matchedOption.getAttribute('data-ou');
+
+        AppState.selectedSchool = {
+            nama_sekolah: schoolName,
+            kod_ou: schoolOu
+        };
+
+        showSelectedSchool(schoolName, schoolOu);
+    } else {
+        // Jika input ditaip secara manual tapi tiada dalam senarai
+        AppState.selectedSchool = null;
+        if(UI.startMatchBtn) {
+            UI.startMatchBtn.disabled = true;
+            UI.startMatchBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+        if(UI.selectedSchoolInfo) UI.selectedSchoolInfo.classList.add('hidden');
+    }
 }
 
-// Bootstrap the application
-init();
+/**
+ * PENGENDALI LANGKAH 2 & 3: Orkestrasi Fetch Data Sekolah -> Enjin Padanan
+ * Ini adalah fungsi kritikal yang menggabungkan aliran V2.
+ */
+async function handleStartMatchingProcess() {
+    if (AppState.uploadedExcelData.length === 0) {
+        alert("Ralat: Sila muat naik fail data terlebih dahulu.");
+        return;
+    }
+
+    if (!AppState.selectedSchool) {
+        alert("Ralat: Sila pilih nama sekolah yang sah dari senarai.");
+        return;
+    }
+
+    try {
+        // FASA 1: Tarik Data Sekolah (Peringkat 1)
+        showProgress("Mengambil Data Skop Sekolah", `Memuat turun data DELIMa untuk OU: ${AppState.selectedSchool.kod_ou}...`);
+        const localDelimaData = await fetchSchoolData(AppState.selectedSchool.kod_ou);
+
+        if (localDelimaData.length === 0) {
+            console.warn(`Tiada rekod dijumpai untuk OU ${AppState.selectedSchool.kod_ou}. Sistem akan bergantung sepenuhnya pada carian global.`);
+        }
+
+        // FASA 2: Jalankan Enjin Padanan
+        showProgress("Memulakan Enjin Padanan", "Menganalisis data baris demi baris...");
+        
+        const result = await runMatchingEngine(
+            AppState.uploadedExcelData,
+            localDelimaData,
+            fetchGlobalMatch, // Pass referensi API Peringkat 2
+            updateProgress    // Pass referensi UI Progress
+        );
+
+        // Simpan hasil ke state global
+        AppState.finalMatchedData = result.finalData;
+        
+        hideProgress();
+        
+        // Papar keputusan
+        showResults(result.stats);
+        
+    } catch (error) {
+        hideProgress();
+        console.error("Ralat fatal Sistem Padanan V2:", error);
+        alert(`Berlaku ralat ketika memproses data: ${error.message}`);
+    }
+}
