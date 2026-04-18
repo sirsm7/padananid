@@ -1,36 +1,38 @@
 /**
- * Modul: Enjin Padanan Data (Forensic Debug Edition)
+ * Modul: Enjin Padanan Data (Name-Only Edition)
  * Folder: /src/js/matcher.js
- * Fungsi: Logik padanan dengan sistem audit log dan pengesan lajur dinamik.
- * Arkitek: Pro Web Caster (Zero-Hallucination V3)
+ * Fungsi: Logik padanan berdasarkan NAMA sahaja mengikut skema Supabase terkini.
+ * Arkitek: Pro Web Caster (Zero-Hallucination V3.1)
+ * Nota: Lajur IC dibuang kerana tidak wujud dalam skema pangkalan data.
  */
 
 /**
- * Normalisasi Nama (Standard GAS)
- * Memastikan perbandingan string adalah kalis ralat.
+ * Normalisasi Nama (Standard GAS / DELIMa)
+ * Memastikan perbandingan string adalah kalis ralat (case-insensitive & clean).
  */
 export const normalizeName = (name) => {
     if (!name || typeof name !== 'string') return '';
     let cleanName = name.toUpperCase();
+    
+    // Buang bahagian emel jika ada (cth: AHMAD@moe-dl.edu.my)
     cleanName = cleanName.split('@')[0];
     cleanName = cleanName.trim();
+    
+    // Buang suffix kategori DELIMa yang biasa
     cleanName = cleanName.replace(/\s*(MOE|KPM[- ]?MURID|KPM[- ]?GURU)$/g, '');
+    
+    // Buang simbol khas kecuali ruang kosong
     cleanName = cleanName.replace(/[^A-Z0-9\s]/g, '');
+    
+    // Buang ruang kosong berlebihan
     cleanName = cleanName.replace(/\s+/g, ' ');
+    
     return cleanName.trim();
 };
 
 /**
- * Normalisasi IC
- * Membuang sempang dan ruang kosong.
- */
-export const normalizeIC = (ic) => {
-    if (!ic) return '';
-    return String(ic).replace(/[^0-9]/g, '').trim();
-};
-
-/**
  * Ekstrak Kod OU
+ * Memastikan kod OU yang dipulangkan adalah format angka bersih (jika perlu).
  */
 export const extractOU = (ouString) => {
     if (!ouString) return '';
@@ -45,7 +47,6 @@ export const extractOU = (ouString) => {
 const findValueByKeys = (row, possibleKeys) => {
     const rowKeys = Object.keys(row);
     for (const pKey of possibleKeys) {
-        // Cari padanan kunci secara case-insensitive dan tanpa ruang kosong
         const targetKey = rowKeys.find(rKey => 
             rKey.trim().toUpperCase() === pKey.toUpperCase()
         );
@@ -55,17 +56,17 @@ const findValueByKeys = (row, possibleKeys) => {
 };
 
 /**
- * Enjin Padanan Utama
+ * Enjin Padanan Utama (Skop Nama Sahaja)
  */
 export const runMatchingEngine = async (excelData, localDelimaData, fetchGlobalCallback, progressCallback) => {
-    console.group("🔍 PROSES AUDIT PADANAN BERMULA");
+    console.group("🔍 PROSES AUDIT PADANAN (NAME-ONLY) BERMULA");
     console.log("📊 Data CSV Diterima:", excelData.length, "rekod");
-    console.log("📊 Data API Sekolah:", localDelimaData.length, "rekod");
+    console.log("📊 Data API Sekolah (Lokal):", localDelimaData.length, "rekod");
 
     const stats = {
         total: excelData.length,
-        successTier1: 0,
-        successTier2: 0,
+        successTier1: 0, // Padanan sekolah
+        successTier2: 0, // Padanan global
         failed: 0
     };
 
@@ -79,70 +80,56 @@ export const runMatchingEngine = async (excelData, localDelimaData, fetchGlobalC
     const unmatchedNames = [];
 
     // ---------------------------------------------------------
-    // PRA-PEMPROSESAN: Bina Hash Maps
+    // PRA-PEMPROSESAN: Bina Hash Map Nama Lokal
     // ---------------------------------------------------------
     const localNameMap = new Map();
-    const localIcMap = new Map();
 
-    localDelimaData.forEach((item, index) => {
-        // Log sampel pertama untuk pengesahan kunci API
-        if (index === 0) {
-            console.log("🧪 Sampel Kunci API Supabase:", Object.keys(item));
-        }
-        
+    localDelimaData.forEach((item) => {
+        // Skema Supabase: menggunakan 'nama_penuh'
         const name = item.nama_penuh || item.nama;
-        const ic = item.no_kp || item.nokp;
-        
         const normName = normalizeName(name);
-        const normIc = normalizeIC(ic);
 
-        if (normName) localNameMap.set(normName, item);
-        if (normIc) localIcMap.set(normIc, item);
+        if (normName) {
+            // Jika ada nama bertindih, kita ambil yang pertama (boleh ditambah logik keutamaan jika perlu)
+            if (!localNameMap.has(normName)) {
+                localNameMap.set(normName, item);
+            }
+        }
     });
 
-    console.log("🛠️ Map Lokal Dibina:", { 
-        Nama: localNameMap.size, 
-        IC: localIcMap.size 
-    });
+    console.log("🛠️ Map Lokal Dibina (Nama Unik):", localNameMap.size);
 
     // ---------------------------------------------------------
-    // PERINGKAT 1: Carian Lokal
+    // PERINGKAT 1: Carian Lokal (Skop Sekolah/OU)
     // ---------------------------------------------------------
     for (let i = 0; i < excelData.length; i++) {
         const row = excelData[i];
         
-        // Cari nilai menggunakan pelbagai kemungkinan kunci pengepala
-        const rawName = findValueByKeys(row, ['NAMA', 'NAMA MURID', 'NAME']);
-        const rawIc = findValueByKeys(row, ['NO. PENGENALAN', 'NO PENGENALAN', 'NO KP', 'IC', 'IDENTIFICATION NO']);
-
-        if (i === 0) {
-            console.log("📌 Pengecam Lajur (Baris 1):", {
-                "Nama Dikesan": rawName,
-                "IC Dikesan": rawIc,
-                "Kunci CSV": Object.keys(row)
-            });
-        }
+        // Pengecam lajur dinamik untuk lajur NAMA
+        const rawName = findValueByKeys(row, ['NAMA', 'NAMA MURID', 'NAME', 'NAMA PENUH']);
 
         if (i % 50 === 0 && typeof progressCallback === 'function') {
-            progressCallback(i, excelData.length, "Memproses Peringkat 1...");
+            progressCallback(i, excelData.length, "Memproses Peringkat 1 (Carian Sekolah)...");
             await new Promise(resolve => setTimeout(resolve, 0));
         }
 
         const searchName = normalizeName(rawName);
-        const searchIc = normalizeIC(rawIc);
-
         let match = null;
-        if (searchIc) match = localIcMap.get(searchIc);
-        if (!match && searchName) match = localNameMap.get(searchName);
+
+        if (searchName) {
+            match = localNameMap.get(searchName);
+        }
 
         if (match) {
+            // Kemaskini baris Excel dengan data dari Supabase
             row['EMEL'] = match.emel || '';
-            row['NAMA SEKOLAH'] = match.nama_sekolah || match.sekolah || '';
+            row['NAMA SEKOLAH'] = match.nama_sekolah || '';
             row['KOD OU'] = extractOU(match.ou);
             row['STATUS PADANAN'] = 'BERJAYA (SKOP SEKOLAH)';
             stats.successTier1++;
         } else {
-            unmatchedRecords.push({ row, searchName, searchIc });
+            // Simpan untuk carian global peringkat 2
+            unmatchedRecords.push({ row, searchName });
             if (searchName && !unmatchedNames.includes(searchName)) {
                 unmatchedNames.push(searchName);
             }
@@ -152,35 +139,29 @@ export const runMatchingEngine = async (excelData, localDelimaData, fetchGlobalC
     console.log("✅ Peringkat 1 Selesai. Gagal Padan Lokal:", unmatchedRecords.length);
 
     // ---------------------------------------------------------
-    // PERINGKAT 2: Carian Global
+    // PERINGKAT 2: Carian Global (Jika Peringkat 1 Gagal)
     // ---------------------------------------------------------
     if (unmatchedNames.length > 0) {
         console.log("🌐 Memulakan Carian Global untuk:", unmatchedNames.length, "nama unik.");
         
         try {
             const globalResults = await fetchGlobalCallback(unmatchedNames);
-            console.log("📥 Data Global Diterima:", globalResults.length, "rekod");
-
+            
             const globalNameMap = new Map();
-            const globalIcMap = new Map();
-
             globalResults.forEach(item => {
                 const normName = normalizeName(item.nama_penuh || item.nama);
-                const normIc = normalizeIC(item.no_kp || item.nokp);
-                if (normName) globalNameMap.set(normName, item);
-                if (normIc) globalIcMap.set(normIc, item);
+                if (normName && !globalNameMap.has(normName)) {
+                    globalNameMap.set(normName, item);
+                }
             });
 
             for (const record of unmatchedRecords) {
-                const { row, searchName, searchIc } = record;
-                
-                let match = null;
-                if (searchIc) match = globalIcMap.get(searchIc);
-                if (!match && searchName) match = globalNameMap.get(searchName);
+                const { row, searchName } = record;
+                const match = globalNameMap.get(searchName);
 
                 if (match) {
                     row['EMEL'] = match.emel || '';
-                    row['NAMA SEKOLAH'] = match.nama_sekolah || match.sekolah || '';
+                    row['NAMA SEKOLAH'] = match.nama_sekolah || '';
                     row['KOD OU'] = extractOU(match.ou);
                     row['STATUS PADANAN'] = 'BERJAYA (CARIAN GLOBAL)';
                     stats.successTier2++;
@@ -194,13 +175,10 @@ export const runMatchingEngine = async (excelData, localDelimaData, fetchGlobalC
             }
         } catch (error) {
             console.error("❌ Ralat Carian Global:", error);
-            // Tandakan baki sebagai gagal jika API global ralat
             unmatchedRecords.forEach(record => {
-                if (!record.row['STATUS PADANAN']) {
-                    record.row['EMEL'] = 'RALAT API';
-                    record.row['STATUS PADANAN'] = 'GAGAL (RALAT SISTEM)';
-                    stats.failed++;
-                }
+                record.row['EMEL'] = 'RALAT API';
+                record.row['STATUS PADANAN'] = 'GAGAL (RALAT SISTEM)';
+                stats.failed++;
             });
         }
     }
