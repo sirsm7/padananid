@@ -11,9 +11,6 @@
     <!-- SheetJS (via CDN for client-side Excel/CSV parsing) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-    <!-- Custom CSS (if needed, kept separate as per SoC) -->
-    <link rel="stylesheet" href="./style.css">
-
     <!-- Tailwind Config for Custom Colors/Fonts -->
     <script>
         tailwind.config = {
@@ -218,17 +215,13 @@
         </div>
     </footer>
 
-    <!-- Modular Script Imports (Order is important based on dependencies) -->
-    <!-- API Config & Fetch Logic -->
-    <script src="./src/js/api.js"></script>
-    <!-- UI Manipulation Logic -->
-    <script src="./src/js/ui.js"></script>
-    <!-- Algorithm & Regex Logic -->
-    <script src="./src/js/matcher.js"></script>
-    <!-- SheetJS Wrapper Logic -->
-    <script src="./src/js/fileHandler.js"></script>
-    <!-- Main Controller -->
-    <script src="./src/js/app.js"></script>
+    <!-- 
+      TINDAKAN SENIBINA: 
+      1. Membuang pautan style.css yang tidak diperlukan.
+      2. Menggantikan rantaian skrip dengan HANYA SATU Controller Utama.
+      3. Wajib menggunakan type="module" untuk membolehkan ES6 import/export beroperasi dengan betul pada browser.
+    -->
+    <script type="module" src="./src/js/app.js"></script>
 
 </body>
 </html>
