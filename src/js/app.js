@@ -24,6 +24,7 @@ import { executeMatching } from './core/matcher.js';
 // ============================================================================
 let currentCsvFile = null;
 let finalMatchResults = [];
+let processedUploadData = null; // Tambahan: Simpan data yang telah diproses dari fail Excel/CSV
 
 // ============================================================================
 // INISIALISASI SISTEM
@@ -86,35 +87,74 @@ const setupEventListeners = () => {
 const processFileSelection = (file) => {
     if (!file) return;
 
-    // Pengesahan Format
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-        logMessage(`Penolakan Fail: "${file.name}" bukan berformat .CSV`, 'error');
+    const fileName = file.name.toLowerCase();
+    
+    // Pengesahan Format (Dikemas kini untuk Excel)
+    if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+        logMessage(`Penolakan Fail: "${file.name}" tidak disokong. Sila gunakan format .CSV atau Excel (.XLSX/.XLS)`, 'error');
         return;
     }
 
     currentCsvFile = file;
 
-    // Gunakan PapaParse untuk membaca secara pantas jumlah baris
-    window.Papa.parse(file, {
-        header: false,
-        skipEmptyLines: true,
-        complete: (results) => {
-            const rowCount = results.data.length;
-            showFileInfo(file.name, rowCount);
-            logMessage(`Fail "${file.name}" dimuat naik (${rowCount} baris dikesan). Sedia untuk proses.`, 'info');
-        },
-        error: (err) => {
-            logMessage(`Ralat membaca fail: ${err.message}`, 'error');
-        }
-    });
+    // Logik Pemprosesan Berdasarkan Jenis Fail
+    if (fileName.endsWith('.csv')) {
+        // Gunakan PapaParse untuk fail CSV
+        window.Papa.parse(file, {
+            header: false,
+            skipEmptyLines: true,
+            complete: (results) => {
+                const rowCount = results.data.length;
+                processedUploadData = results.data; // Simpan ke pembolehubah global
+                showFileInfo(file.name, rowCount);
+                logMessage(`Fail CSV "${file.name}" dimuat naik (${rowCount} baris dikesan). Sedia untuk proses.`, 'info');
+            },
+            error: (err) => {
+                logMessage(`Ralat membaca fail CSV: ${err.message}`, 'error');
+            }
+        });
+    } else {
+        // Gunakan SheetJS untuk fail Excel (.xlsx, .xls)
+        const reader = new FileReader();
+        
+        reader.onload = (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                // Baca buku kerja Excel
+                const workbook = window.XLSX.read(data, { type: 'array' });
+                
+                // Ambil helaian (worksheet) pertama
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                
+                // Tukar kepada format matriks 2D (Sama seperti PapaParse)
+                // { header: 1 } memaksa output menjadi Array of Arrays
+                const jsonArray = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false });
+                
+                const rowCount = jsonArray.length;
+                processedUploadData = jsonArray; // Simpan ke pembolehubah global
+                showFileInfo(file.name, rowCount);
+                logMessage(`Fail Excel "${file.name}" dimuat naik (${rowCount} baris dikesan pada helaian "${firstSheetName}"). Sedia untuk proses.`, 'info');
+                
+            } catch (err) {
+                logMessage(`Ralat membaca fail Excel: Sila pastikan fail tidak rosak. Mesej: ${err.message}`, 'error');
+            }
+        };
+        
+        reader.onerror = () => {
+            logMessage("Ralat semasa membaca fail dari sistem.", 'error');
+        };
+        
+        reader.readAsArrayBuffer(file);
+    }
 };
 
 // ============================================================================
 // LOGIK TERAS: PROSES PADANAN (MATCHING)
 // ============================================================================
 const handleDataProcessing = async () => {
-    if (!currentCsvFile) {
-        logMessage('Tiada fail CSV dipilih untuk diproses.', 'warning');
+    if (!currentCsvFile || !processedUploadData) {
+        logMessage('Tiada fail sah dipilih untuk diproses.', 'warning');
         return;
     }
 
@@ -124,16 +164,9 @@ const handleDataProcessing = async () => {
         UI.btnDownload.disabled = true;
         logMessage('Memulakan sesi padanan data...', 'info');
         
-        // Fasa 1: Baca CSV ke dalam memory pelayar
-        updateProgress(10, 'Membaca fail CSV tempatan...');
-        const csvData = await new Promise((resolve, reject) => {
-            window.Papa.parse(currentCsvFile, {
-                header: false, // Kita guna array 2D untuk pencarian baris dinamik dalam matcher
-                skipEmptyLines: true,
-                complete: (results) => resolve(results.data),
-                error: (err) => reject(err)
-            });
-        });
+        // Fasa 1: Baca data dari memori (Sudah dibaca semasa 'processFileSelection')
+        updateProgress(10, `Membaca data tempatan dari fail ${currentCsvFile.name}...`);
+        const uploadData = processedUploadData;
 
         // Fasa 2: Tarik Data dari Supabase
         updateProgress(40, 'Menarik data dari Supabase (Sila tunggu)...');
@@ -143,7 +176,7 @@ const handleDataProcessing = async () => {
 
         // Fasa 3: Laksanakan Enjin Padanan
         updateProgress(70, 'Melaksanakan logik padanan nama...');
-        const { results, stats } = executeMatching(csvData, supabaseData);
+        const { results, stats } = executeMatching(uploadData, supabaseData); // Tukar csvData ke uploadData
         
         // Simpan hasil ke memori global untuk muat turun
         finalMatchResults = results;

@@ -11,6 +11,9 @@
     <!-- PapaParse (Client-side CSV Processing) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     
+    <!-- SheetJS (Client-side Excel Processing) -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    
     <!-- Supabase JS Client (via CDN) -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
@@ -41,7 +44,7 @@
         <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex justify-between items-center">
             <div>
                 <h1 class="text-2xl font-bold tracking-tight">Sistem Padanan ID DELIMa KPM</h1>
-                <p class="text-brand-100 text-sm mt-1">Pemprosesan Automatik Data Pelajar via Supabase & CSV</p>
+                <p class="text-brand-100 text-sm mt-1">Pemprosesan Automatik Data Pelajar via Supabase & Excel/CSV</p>
             </div>
             <div class="hidden sm:block">
                 <span class="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20" id="dbStatusBadge">
@@ -57,13 +60,13 @@
         <!-- Grid Layout for Controls -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             
-            <!-- CSV Upload Panel -->
+            <!-- Upload Panel -->
             <div class="col-span-1 md:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <h2 class="text-lg font-semibold text-slate-800 mb-4 flex items-center">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
-                    Muat Naik Fail APDM (CSV)
+                    Muat Naik Fail APDM
                 </h2>
                 
                 <div class="mt-2 flex justify-center rounded-lg border border-dashed border-slate-300 px-6 py-10" id="dropZone">
@@ -73,12 +76,13 @@
                         </svg>
                         <div class="mt-4 flex text-sm leading-6 text-slate-600 justify-center">
                             <label for="csvFileInput" class="relative cursor-pointer rounded-md bg-white font-semibold text-brand-600 focus-within:outline-none focus-within:ring-2 focus-within:ring-brand-600 focus-within:ring-offset-2 hover:text-brand-500">
-                                <span>Pilih fail CSV</span>
-                                <input id="csvFileInput" name="csvFileInput" type="file" class="sr-only" accept=".csv">
+                                <span>Pilih fail</span>
+                                <!-- Dikemas kini untuk menerima pelbagai format -->
+                                <input id="csvFileInput" name="csvFileInput" type="file" class="sr-only" accept=".csv, .xlsx, .xls">
                             </label>
                             <p class="pl-1">atau seret dan lepas</p>
                         </div>
-                        <p class="text-xs leading-5 text-slate-500">Hanya fail berformat .CSV disokong</p>
+                        <p class="text-xs leading-5 text-slate-500">Format disokong: .CSV, .XLSX, .XLS</p>
                     </div>
                 </div>
                 <div id="fileInfo" class="mt-3 text-sm text-slate-600 hidden">
@@ -91,7 +95,7 @@
             <div class="col-span-1 bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-slate-800 mb-4">Tindakan Sistem</h2>
-                    <p class="text-sm text-slate-600 mb-6">Sistem akan menyemak setiap nama dalam fail CSV dan memadankannya dengan pangkalan data Supabase.</p>
+                    <p class="text-sm text-slate-600 mb-6">Sistem akan menyemak setiap nama dalam fail yang dimuat naik dan memadankannya dengan pangkalan data Supabase.</p>
                 </div>
                 <div class="space-y-3">
                     <button id="btnProcess" disabled class="w-full rounded-md bg-brand-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
@@ -126,14 +130,14 @@
             </div>
             <div id="logContainer" class="p-4 h-48 overflow-y-auto font-mono text-xs text-slate-300 space-y-1">
                 <!-- Log entries will be appended here via JS -->
-                <div class="text-slate-500">Sistem bersedia... Sila muat naik fail CSV untuk memulakan sesi.</div>
+                <div class="text-slate-500">Sistem bersedia... Sila muat naik fail CSV atau Excel untuk memulakan sesi.</div>
             </div>
         </div>
 
         <!-- Data Preview Table -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                <h3 class="text-sm font-semibold text-slate-800">Pratonton Hasil Padanan (10 Baris Pertama)</h3>
+                <h3 class="text-sm font-semibold text-slate-800">Pratonton Hasil Padanan (100 Baris Pertama)</h3>
                 <span id="matchStats" class="text-xs font-medium text-slate-500">Berjaya: 0 | Gagal: 0</span>
             </div>
             <div class="overflow-x-auto">
