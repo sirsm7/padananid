@@ -3,18 +3,20 @@
  * Folder: /src/js/api.js
  * Fungsi: Menguruskan semua komunikasi (HTTP requests) secara terus dengan Supabase REST API.
  * Arkitek: Pro Web Caster (Pure Client-to-Supabase Architecture)
- * Kemas kini: Pelaksanaan asinkroni Promise.all untuk mencantum data dari smpid_sekolah_data dan delima_data_sekolah.
+ * Kemas kini: Penukaran jadual ke delima_salinan_admin & Intersepsi Ralat 404 Spesifik.
  */
 
 // ============================================================================
 // KONFIGURASI SUPABASE
-// PERHATIAN: Gantikan nilai di bawah dengan URL dan Anon Key projek Supabase anda.
+// PERHATIAN: Pembolehubah ini mengawal akses ke pangkalan data.
 // ============================================================================
 const SUPABASE_CONFIG = {
     URL: "https://app.tech4ag.my",
     ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzYzMzczNjQ1LCJleHAiOjIwNzg3MzM2NDV9.vZOedqJzUn01PjwfaQp7VvRzSm4aRMr21QblPDK8AoY",
-    // Nama jadual utama yang menyimpan data DELIMa
-    TABLE_DELIMA: "delima_data_admin",
+    
+    // Nama jadual utama yang menyimpan data DELIMa (Dikemas kini)
+    TABLE_DELIMA: "delima_salinan_admin",
+    
     // Nama jadual gabungan untuk senarai unik sekolah
     TABLE_SMPID: "smpid_sekolah_data",
     TABLE_DELIMA_SEKOLAH: "delima_data_sekolah",
@@ -129,6 +131,10 @@ export const fetchSchoolData = async (kodOu) => {
         const response = await fetchSupabase(endpoint, { method: 'GET' });
 
         if (!response.ok) {
+            // Pintasan Ralat 404 (Jadual Tidak Wujud)
+            if (response.status === 404) {
+                throw new Error(`Ralat 404: Jadual '${SUPABASE_CONFIG.TABLE_DELIMA}' tidak wujud di dalam Supabase.`);
+            }
             throw new Error(`Ralat HTTP Supabase (School Data): ${response.status}`);
         }
 
@@ -175,7 +181,11 @@ export const fetchGlobalMatch = async (unmatchedNames) => {
             if (response.ok) {
                 return await response.json();
             } else {
-                console.warn("Chunk gagal diproses:", response.status);
+                if (response.status === 404) {
+                    console.error(`Ralat 404 Carian Global: Jadual '${SUPABASE_CONFIG.TABLE_DELIMA}' tiada.`);
+                } else {
+                    console.warn(`Chunk gagal diproses (HTTP ${response.status})`);
+                }
                 return [];
             }
         });
