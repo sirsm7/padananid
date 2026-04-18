@@ -3,6 +3,7 @@
  * Folder: /src/js/api.js
  * Fungsi: Menguruskan semua komunikasi (HTTP requests) secara terus dengan Supabase REST API.
  * Arkitek: Pro Web Caster (Pure Client-to-Supabase Architecture)
+ * Kemas kini: Pelaksanaan asinkroni Promise.all untuk mencantum data dari smpid_sekolah_data dan delima_data_sekolah.
  */
 
 // ============================================================================
@@ -14,8 +15,9 @@ const SUPABASE_CONFIG = {
     ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzYzMzczNjQ1LCJleHAiOjIwNzg3MzM2NDV9.vZOedqJzUn01PjwfaQp7VvRzSm4aRMr21QblPDK8AoY",
     // Nama jadual utama yang menyimpan data DELIMa
     TABLE_DELIMA: "delima_data_admin",
-    // Nama jadual atau view yang menyimpan senarai unik sekolah
-    TABLE_SCHOOLS: "senarai_sekolah",
+    // Nama jadual gabungan untuk senarai unik sekolah
+    TABLE_SMPID: "smpid_sekolah_data",
+    TABLE_DELIMA_SEKOLAH: "delima_data_sekolah",
     TIMEOUT_MS: 30000 
 };
 
@@ -55,26 +57,58 @@ const fetchSupabase = async (endpoint, options = {}) => {
 };
 
 /**
- * Panggil senarai semua sekolah (Nama dan Kod OU) untuk paparan Dropdown.
- * Menggunakan Supabase REST API.
+ * Panggil senarai semua sekolah dengan mencantum (join) data SMPID dan DELIMA secara asinkroni.
+ * Menggunakan Supabase REST API dengan Promise.all untuk kepantasan maksimum.
  * @returns {Promise<Array>} - Tatasusunan objek sekolah [{nama_sekolah: "SMK A", kod_ou: "12345"}, ...]
  */
 export const fetchSchoolsList = async () => {
     try {
-        // Rujukan endpoint: Pilih nama_sekolah dan kod_ou sahaja, susun mengikut nama_sekolah
-        const endpoint = `/rest/v1/${SUPABASE_CONFIG.TABLE_SCHOOLS}?select=nama_sekolah,kod_ou&order=nama_sekolah.asc`;
+        // Rujukan endpoint untuk kedua-dua jadual
+        const endpointSmpid = `/rest/v1/${SUPABASE_CONFIG.TABLE_SMPID}?select=kod_sekolah,nama_sekolah`;
+        const endpointDelimaSekolah = `/rest/v1/${SUPABASE_CONFIG.TABLE_DELIMA_SEKOLAH}?select=kod_sekolah,kod_ou`;
         
-        const response = await fetchSupabase(endpoint, { method: 'GET' });
+        // Laksanakan kedua-dua panggilan serentak
+        const [resSmpid, resDelimaSekolah] = await Promise.all([
+            fetchSupabase(endpointSmpid, { method: 'GET' }),
+            fetchSupabase(endpointDelimaSekolah, { method: 'GET' })
+        ]);
 
-        if (!response.ok) {
-            throw new Error(`Ralat HTTP Supabase (Schools): ${response.status}`);
+        if (!resSmpid.ok || !resDelimaSekolah.ok) {
+            throw new Error(`Ralat HTTP Supabase: SMPID (${resSmpid.status}), DELIMA (${resDelimaSekolah.status})`);
         }
 
-        const data = await response.json();
-        return Array.isArray(data) ? data : [];
+        const dataSmpid = await resSmpid.json();
+        const dataDelimaSekolah = await resDelimaSekolah.json();
+
+        // Bina Map (Kamus) dari SMPID untuk carian nama O(1)
+        const smpidNameMap = {};
+        if (Array.isArray(dataSmpid)) {
+            dataSmpid.forEach(school => {
+                if (school.kod_sekolah) {
+                    smpidNameMap[school.kod_sekolah.trim()] = school.nama_sekolah;
+                }
+            });
+        }
+
+        // Cantumkan data DELIMA dengan Nama dari Map SMPID
+        const combinedList = [];
+        if (Array.isArray(dataDelimaSekolah)) {
+            dataDelimaSekolah.forEach(item => {
+                if (item.kod_sekolah && item.kod_ou) {
+                    const kodSek = item.kod_sekolah.trim();
+                    combinedList.push({
+                        nama_sekolah: smpidNameMap[kodSek] || "NAMA SEKOLAH TIDAK DIJUMPAI",
+                        kod_ou: item.kod_ou.trim()
+                    });
+                }
+            });
+        }
+
+        // Susun mengikut abjad (A-Z) pada bahagian client-side sebelum dihantar ke UI
+        return combinedList.sort((a, b) => a.nama_sekolah.localeCompare(b.nama_sekolah));
 
     } catch (error) {
-        console.error("Gagal menarik senarai sekolah dari Supabase:", error);
+        console.error("Gagal menarik dan menggabungkan senarai sekolah dari Supabase:", error);
         return mockSchoolsData(); // Fallback untuk UI Testing
     }
 };
