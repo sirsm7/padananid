@@ -2,7 +2,7 @@
  * Modul: Integrasi Supabase (Service)
  * Folder: /src/js/services/supabase.js
  * Fungsi: Menguruskan hubungan, pengesahan, dan penarikan data spesifik.
- * Arkitek: Pro Web Caster (Strategi Wildcard / Memory Fix)
+ * Arkitek: Pro Web Caster (Strategi Wildcard / Memory Fix / Pengecualian OU)
  */
 
 // ============================================================================
@@ -65,13 +65,15 @@ export const fetchDelimaDataByOU = async (kodOU) => {
 };
 
 /**
- * [RESOLUSI PEPIJAT] Strategi Wildcard OR.
+ * [RESOLUSI PEPIJAT] Strategi Wildcard OR berserta Pengecualian OU.
  * Mengelakkan pemuatan >200k rekod yang meranapkan memori.
  * Hanya mencari nama yang wujud dalam unmatchedNames menggunakan .or() dan ilike.
- * @param {Array<string>} unmatchedNames - Array nama (e.g. ['ALI BIN ABU', 'SITI'])
+ * [NAIK TARAF] Menyingkirkan rekod OU sekolah dari Fasa 1 menggunakan query .not()
+ * * @param {Array<string>} unmatchedNames - Array nama (e.g. ['ALI BIN ABU', 'SITI'])
+ * @param {string} kodOU - Kod sekolah dari Fasa 1 untuk dikecualikan dari carian
  * @returns {Promise<Array>} - Hanya rekod yang dipadankan.
  */
-export const fetchFallbackData = async (unmatchedNames) => {
+export const fetchFallbackData = async (unmatchedNames, kodOU) => {
     try {
         if (!unmatchedNames || unmatchedNames.length === 0) return [];
 
@@ -90,10 +92,18 @@ export const fetchFallbackData = async (unmatchedNames) => {
                 return `nama_penuh.ilike.%${wildcardName}%`;
             }).join(',');
 
-            const { data, error } = await supabaseClient
+            // Rantaian asas query
+            let query = supabaseClient
                 .from('delima_salinan_admin')
                 .select('id, kod_sekolah, nama_sekolah, nama_penuh, emel, ou, kategori, status')
                 .or(orQueryString); // Hantar carian serentak
+            
+            // [NAIK TARAF] Kecualikan OU sekolah dari Fasa 1 agar tiada carian berulang (redundancy)
+            if (kodOU) {
+                query = query.not('ou', 'ilike', `%${kodOU}%`);
+            }
+
+            const { data, error } = await query;
 
             if (error) {
                 console.warn("Amaran Fallback Fetch (Wildcard OR):", error.message);

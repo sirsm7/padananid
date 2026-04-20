@@ -2,7 +2,7 @@
  * Modul: Pengawal Utama Sistem (App Controller)
  * Folder: /src/js/app.js
  * Fungsi: Mengkoordinasi Aliran Data Berperingkat (Two-Pass) yang telah dipertingkatkan.
- * Arkitek: Pro Web Caster (Resolusi Pepijat Memori / Susunan Data / Eksport Dinamik V2)
+ * Arkitek: Pro Web Caster (Resolusi Pepijat Memori / Pengesanan Duplikasi / Pengecualian OU)
  */
 
 import { 
@@ -160,7 +160,8 @@ const handleDataProcessing = async () => {
 
         updateProgress(40, 'Melaksanakan Padanan Peringkat 1...');
         const phase1Data = executePhase1(processedUploadData, primaryData);
-        logMessage(`Fasa 1 Selesai. ${phase1Data.stats.successPhase1} padanan tepat dijumpai. ${phase1Data.stats.failedPhase1} rekod akan dicari di peringkat global.`, 'info');
+        // [MODIFIKASI] Paparan log untuk mengambil kira rekod duplikasi dari Fasa 1
+        logMessage(`Fasa 1 Selesai. ${phase1Data.stats.successPhase1} padanan tepat, ${phase1Data.stats.duplicatePhase1 || 0} duplikasi. ${phase1Data.stats.failedPhase1} rekod akan dicari di peringkat global.`, 'info');
 
         let finalData = { results: phase1Data.matchedResults, stats: phase1Data.stats };
 
@@ -168,9 +169,11 @@ const handleDataProcessing = async () => {
         // [RESOLUSI MEMORI] Menghantar parameter unmatchedNames ke fungsi fetchFallbackData
         if (phase1Data.unmatchedNames.length > 0) {
             updateProgress(60, 'Melaksanakan carian spesifik (Wildcard) untuk rekod yang gagal...');
-            logMessage(`Menghantar ${phase1Data.unmatchedNames.length} nama untuk carian Fallback global...`, 'info');
+            // [MODIFIKASI] Maklumat log mengesahkan pengecualian OU sekolah sedang berjalan
+            logMessage(`Menghantar ${phase1Data.unmatchedNames.length} nama untuk Fallback (Mengecualikan OU ${selectedOU})...`, 'info');
             
-            const fallbackData = await fetchFallbackData(phase1Data.unmatchedNames);
+            // [MODIFIKASI] Menghantar parameter selectedOU untuk rantaian query .not()
+            const fallbackData = await fetchFallbackData(phase1Data.unmatchedNames, selectedOU);
             logMessage(`Berjaya menjumpai ${fallbackData.length} kemungkinan padanan dari carian global.`, 'success');
             
             updateProgress(80, 'Melaksanakan Padanan Peringkat 2...');
@@ -192,7 +195,8 @@ const handleDataProcessing = async () => {
         updateStats(finalData.stats);
 
         updateProgress(100, 'Proses selesai sepenuhnya');
-        logMessage(`Padanan Selesai! Berjaya: ${finalData.stats.success} | Gagal: ${finalData.stats.failed}`, 'success');
+        // [MODIFIKASI] Log mencerminkan parameter Gagal/Duplikasi gabungan
+        logMessage(`Padanan Selesai! Berjaya: ${finalData.stats.success} | Gagal/Duplikasi: ${finalData.stats.failed}`, 'success');
         
         UI.btnDownload.disabled = false;
 
