@@ -2,7 +2,7 @@
  * Modul: Pengawal Utama Sistem (App Controller)
  * Folder: /src/js/app.js
  * Fungsi: Mengkoordinasi Aliran Data Berperingkat (Two-Pass) yang telah dipertingkatkan.
- * Arkitek: Pro Web Caster (Resolusi Pepijat Memori / Pengesanan Duplikasi / Pengecualian OU)
+ * Arkitek: Pro Web Caster (Resolusi Pepijat Memori / Susunan Data 3-Peringkat / Eksport Dinamik V2)
  */
 
 import { 
@@ -180,11 +180,18 @@ const handleDataProcessing = async () => {
             finalData = executePhase2(phase1Data.unmatchedRows, fallbackData, phase1Data.matchedResults, phase1Data.stats);
         }
 
-        // [MODIFIKASI] Algoritma Susunan (Sorting)
-        // Susun hasil supaya yang berjaya (true) berada di atas dan gagal (false) diletakkan di bawah.
+        // [MODIFIKASI V2] Algoritma Susunan Tiga Peringkat (Sorting)
+        // 1. PADANAN BERJAYA (statusFlag: true) -> Atas
+        // 2. DATA DUPLICATE -> Tengah
+        // 3. TIADA DATA -> Bawah
+        const getSortWeight = (row) => {
+            if (row.statusFlag === true) return 1; // Keutamaan 1 (Atas)
+            if (row.dbName === 'DUPLIKASI REKOD' || row.status.includes('DUPLICATE')) return 2; // Keutamaan 2 (Tengah)
+            return 3; // Keutamaan 3 (Paling Bawah)
+        };
+
         finalData.results.sort((a, b) => {
-            if (a.statusFlag === b.statusFlag) return 0;
-            return a.statusFlag ? -1 : 1;
+            return getSortWeight(a) - getSortWeight(b);
         });
 
         finalMatchResults = finalData.results;

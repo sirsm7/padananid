@@ -174,12 +174,14 @@ export const executePhase2 = (unmatchedRows, fallbackData, currentResults, curre
                 originalName: item.rawName,
                 tahunTingkatan: item.rawYear,
                 namaKelas: item.rawClass,
-                dbName: 'TIDAK JUMPA',
+                // [MODIFIKASI] Tukar 'TIDAK JUMPA' kepada 'TIADA DATA'
+                dbName: 'TIADA DATA',
                 email: '-',
                 ou: '-',
                 namaSekolah: '-',
                 kategori: '-',
-                status: 'TIADA, data tiada di OU JPN Melaka',
+                // [MODIFIKASI] Selaraskan status padanan
+                status: 'TIADA DATA, data tiada di OU JPN Melaka',
                 statusFlag: false
             });
         }
