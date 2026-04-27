@@ -111,24 +111,29 @@ const renderDropdownOptions = (schoolsToRender) => {
             li.innerHTML = `<span class="block truncate">${school.nama_sekolah} <span class="text-xs text-slate-400">(${school.kod_ou})</span></span>`;
             
             // Peristiwa klik untuk memilih sekolah
+            // ── SURGICAL EDIT START: pass selected school code into UI state ──
             li.addEventListener('mousedown', () => {
-                selectSchool(school.nama_sekolah, school.kod_ou);
+                selectSchool(school.nama_sekolah, school.kod_ou, school.kod_sekolah);
             });
+            // ── SURGICAL EDIT END ──
             
             UI.schoolDropdownList.appendChild(li);
         }
     });
 };
 
-const selectSchool = (namaSekolah, kodOU) => {
+// ── SURGICAL EDIT START: store selected school code separately from selected OU ──
+const selectSchool = (namaSekolah, kodOU, kodSekolah) => {
     UI.schoolSearchInput.value = namaSekolah;
     UI.selectedSchoolOU.value = kodOU;
+    UI.schoolSearchInput.dataset.selectedSchoolCode = kodSekolah || '';
     UI.schoolDropdownList.classList.add('hidden');
     
     // Tunjuk butang pangkah (clear)
     UI.btnClearSchool.classList.remove('hidden');
     UI.iconDropdown.classList.add('hidden');
 };
+// ── SURGICAL EDIT END ──
 
 const setupDropdownListeners = () => {
     // 1. Carian bila menaip (Filter)
@@ -136,14 +141,20 @@ const setupDropdownListeners = () => {
         const searchText = e.target.value.toLowerCase();
         
         // Reset nilai rahsia jika pengguna menaip semula
+        // ── SURGICAL EDIT START: reset selected school code when search text changes ──
         UI.selectedSchoolOU.value = '';
+        UI.schoolSearchInput.dataset.selectedSchoolCode = '';
         UI.btnClearSchool.classList.add('hidden');
         UI.iconDropdown.classList.remove('hidden');
+        // ── SURGICAL EDIT END ──
 
+        // ── SURGICAL EDIT START: allow dropdown search by official school code ──
         const filtered = globalSchoolsList.filter(s => 
             (s.nama_sekolah && s.nama_sekolah.toLowerCase().includes(searchText)) ||
-            (s.kod_ou && s.kod_ou.toLowerCase().includes(searchText))
+            (s.kod_ou && s.kod_ou.toLowerCase().includes(searchText)) ||
+            (s.kod_sekolah && s.kod_sekolah.toLowerCase().includes(searchText))
         );
+        // ── SURGICAL EDIT END ──
         
         renderDropdownOptions(filtered);
         UI.schoolDropdownList.classList.remove('hidden');
@@ -168,12 +179,15 @@ const setupDropdownListeners = () => {
 
     // 4. Butang pangkah (Clear)
     UI.btnClearSchool.addEventListener('click', () => {
+        // ── SURGICAL EDIT START: clear selected school code with selected OU ──
         UI.schoolSearchInput.value = '';
         UI.selectedSchoolOU.value = '';
+        UI.schoolSearchInput.dataset.selectedSchoolCode = '';
         UI.btnClearSchool.classList.add('hidden');
         UI.iconDropdown.classList.remove('hidden');
         renderDropdownOptions(globalSchoolsList);
         UI.schoolSearchInput.focus();
+        // ── SURGICAL EDIT END ──
     });
 };
 
@@ -181,6 +195,12 @@ const setupDropdownListeners = () => {
 export const getSelectedSchoolOU = () => {
     return UI.selectedSchoolOU ? UI.selectedSchoolOU.value : '';
 };
+
+// ── SURGICAL EDIT START: expose selected school code for export filename ──
+export const getSelectedSchoolCode = () => {
+    return UI.schoolSearchInput ? UI.schoolSearchInput.dataset.selectedSchoolCode || '' : '';
+};
+// ── SURGICAL EDIT END ──
 
 // ============================================================================
 // FUNGSI LAIN-LAIN

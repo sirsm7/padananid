@@ -5,11 +5,13 @@
  * Arkitek: Pro Web Caster (Resolusi Pepijat Memori / Susunan Data 3-Peringkat / Eksport Dinamik V2)
  */
 
+// ── SURGICAL EDIT START: import selected school code getter for export filename ──
 import { 
     UI, logMessage, clearLogs, updateDbStatus, showFileInfo, 
     updateProgress, renderTable, updateStats, populateSchoolDropdown,
-    getSelectedSchoolOU
+    getSelectedSchoolOU, getSelectedSchoolCode
 } from './ui/dom.js';
+// ── SURGICAL EDIT END ──
 
 import { 
     checkSupabaseConnection, fetchSchoolsList, fetchDelimaDataByOU, fetchFallbackData 
@@ -245,12 +247,13 @@ const handleDownloadResults = () => {
     const blob = new Blob(["\ufeff", csvString], { type: 'text/csv;charset=utf-8;' }); 
     const url = URL.createObjectURL(blob);
     
-    // [MODIFIKASI] Penjanaan Nama Fail Dinamik (SEKOLAH + TIMESTAMP)
-    let rawSchoolName = UI.schoolSearchInput ? UI.schoolSearchInput.value : '';
-    if (!rawSchoolName.trim()) rawSchoolName = 'SEKOLAH';
+    // ── SURGICAL EDIT START: generate export filename using official school code ──
+    // [MODIFIKASI] Penjanaan Nama Fail Dinamik (KOD SEKOLAH + TIMESTAMP)
+    let rawSchoolCode = getSelectedSchoolCode();
+    if (!rawSchoolCode.trim()) rawSchoolCode = 'SEKOLAH';
     
-    // Tapis nama sekolah dari sebarang karakter yang tidak sah untuk nama fail Windows/Mac
-    const safeSchoolName = rawSchoolName.replace(/[\\/:*?"<>|]/g, '').trim();
+    // Tapis kod sekolah dari sebarang karakter yang tidak sah untuk nama fail Windows/Mac
+    const safeSchoolCode = rawSchoolCode.replace(/[\\/:*?"<>|]/g, '').trim();
 
     // Format masa: YYYYMMDD HHmm
     const now = new Date();
@@ -261,7 +264,8 @@ const handleDownloadResults = () => {
     const min = String(now.getMinutes()).padStart(2, '0');
     
     const formattedTimestamp = `${yyyy}${mm}${dd} ${hh}${min}`;
-    const dynamicFileName = `${safeSchoolName} ${formattedTimestamp}.csv`;
+    const dynamicFileName = `${safeSchoolCode} ${formattedTimestamp}.csv`;
+    // ── SURGICAL EDIT END ──
 
     const downloadLink = document.createElement("a");
     downloadLink.href = url;

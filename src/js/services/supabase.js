@@ -34,10 +34,12 @@ export const checkSupabaseConnection = async () => {
 
 export const fetchSchoolsList = async () => {
     try {
+        // ── SURGICAL EDIT START: include school code in dropdown query for export filename ──
         const { data, error } = await supabaseClient
             .from('delima_data_sekolah')
-            .select('kod_ou, nama_sekolah')
+            .select('kod_sekolah, kod_ou, nama_sekolah')
             .order('nama_sekolah', { ascending: true });
+        // ── SURGICAL EDIT END ──
 
         if (error) throw new Error(`Gagal menarik senarai sekolah: ${error.message}`);
         return data || [];
