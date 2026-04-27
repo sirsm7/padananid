@@ -114,6 +114,11 @@ export const executePhase1 = (csvData, primaryData) => {
         }
     }
 
+    // ── SURGICAL EDIT START: normalize Phase 1 stats for direct final logging when Phase 2 is skipped ──
+    stats.success = stats.successPhase1;
+    stats.failed = stats.total - stats.success;
+    // ── SURGICAL EDIT END ──
+
     return { matchedResults, unmatchedNames, unmatchedRows, headers, nameColIndex, stats };
 };
 
